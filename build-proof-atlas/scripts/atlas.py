@@ -8,6 +8,7 @@ import re
 import shutil
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -175,14 +176,110 @@ def github_verification(project, receipt_path, commit):
     return data
 
 
+def manuscript_claims(root, p):
+    claims = []
+    for source in p["tex"]:
+        claims.extend(inventory(read_source(root, source).decode("utf-8-sig"), source["path"], p["environments"]))
+    return claims
+
+
+def load_approvals(root):
+    """Author approvals of Lean statements, kept apart from the agent's checkpoints."""
+    path = root / "approvals.json"
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    if data.get("schema_version") != 1:
+        raise ValueError("approvals.json: expected schema version 1")
+    return data["claims"]
+
+
+def approval_state(approval, audit):
+    """An approval holds while the audited statement and its definitions hash as approved."""
+    statement = audit.get("statement")
+    if not approval:
+        return None, []
+    if statement and approval["expected"] == audit["expected"] and approval["statement_sha256"] == statement["sha256"]:
+        return approval, []
+    now = {c["name"]: c["sha256"] for c in (statement or {}).get("constants", [])}
+    then = approval.get("constants", {})
+    changed = sorted(n for n in now.keys() | then.keys() if now.get(n) != then.get(n))
+    return None, changed or [audit["expected"]]
+
+
+def current_audit(root, cid, w):
+    """The closure's receipt, provided the audited sources are unchanged."""
+    if w.get("status") != "closed":
+        raise ValueError(f"{cid}: only a closed claim with a Lean audit can be approved")
+    audit = json.loads(local(root, w["closure"]["audit"]).read_bytes())
+    for path, digest in w.get("checked_inputs", {}).items():
+        if not local(root, path).is_file() or hashlib.sha256(local(root, path).read_bytes()).hexdigest() != digest:
+            raise ValueError(f"{cid}: {path} changed since the Lean check; recheck the claim first")
+    if not audit.get("statement"):
+        raise ValueError(f"{cid}: the audit predates statement records; rerun audit_lean.py with this skill version")
+    return audit
+
+
+def approve(root, labels, by, ask=input):
+    """Show each audited statement with its definitions and record the author's approval."""
+    if not by.strip():
+        raise ValueError("Give the approving author's name with --by")
+    if not sys.stdin.isatty():
+        raise ValueError("Statement approval is typed by the author at an interactive terminal")
+    p = json.loads((root / "project.json").read_text(encoding="utf-8-sig"))
+    claims = {c["id"]: c for c in manuscript_claims(root, p)}
+    work = p.get("work", {})
+    approvals = load_approvals(root)
+    if not labels:
+        labels = [cid for cid, w in work.items() if w.get("status") == "closed" and
+                  not approval_state(approvals.get(cid), json.loads(local(root, w["closure"]["audit"]).read_bytes()))[0]]
+        print(f"{len(labels)} closed claims await statement approval.")
+    for cid in labels:
+        if cid not in claims or cid not in work:
+            raise ValueError(f"{cid}: no checkpoint for this manuscript claim")
+        try:
+            audit = current_audit(root, cid, work[cid])
+        except ValueError as exc:
+            print(exc)
+            continue
+        package = work[cid]["closure"]["package"]
+        print(f"\n=== {cid} · {claims[cid]['file']}, line {claims[cid]['line']} ===\n{claims[cid]['excerpt']}\n")
+        print(f"Lean statement {audit['expected']} and the definitions it uses from this project:")
+        shown = set()
+        constants = sorted(audit["statement"]["constants"], key=lambda c: (c["name"] != audit["expected"], c["file"], c["lines"] or []))
+        for c in constants:
+            key = (c["file"], tuple(c["lines"] or ()))
+            if c["lines"] and key not in shown:
+                shown.add(key)
+                lines = local(root, package + "/" + c["file"]).read_text(encoding="utf-8-sig").splitlines()
+                print(f"\n-- {package}/{c['file']}, lines {c['lines'][0]}-{c['lines'][1]}")
+                print("\n".join(lines[c["lines"][0] - 1:c["lines"][1]]))
+        hidden = sum(1 for c in audit["statement"]["constants"] if not c["lines"])
+        if hidden:
+            print(f"\n(plus {hidden} constants Lean generated from these definitions)")
+        try:
+            answer = ask(f"\nTo approve this statement as {by}, type the claim label {cid} (Enter skips): ")
+        except EOFError:
+            answer = ""
+        if answer.strip() != cid:
+            print(f"{cid}: not approved")
+            continue
+        approvals[cid] = dict(by=by, approved=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                              expected=audit["expected"], statement_sha256=audit["statement"]["sha256"],
+                              constants={c["name"]: c["sha256"] for c in audit["statement"]["constants"]})
+        data = json.dumps(dict(schema_version=1, claims=approvals), indent=2, ensure_ascii=False) + "\n"
+        atomic(root / "approvals.json", data.encode())
+        print(f"{cid}: statement approved by {by}")
+
+
 def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     p = json.loads((root / "project.json").read_text(encoding="utf-8-sig"))
     ci = github_verification(p, ci_receipt, commit)
     if p["schema_version"] != 1 or not p["environments"]:
         raise ValueError("project.json: expected schema version 1 and theorem environments")
-    claims = []
-    for source in p["tex"]:
-        claims.extend(inventory(read_source(root, source).decode("utf-8-sig"), source["path"], p["environments"]))
+    claims = manuscript_claims(root, p)
+    approvals = load_approvals(root)
+    awaiting_approval, withdrawn = [], []
     by_id = {c["id"]: c for c in claims}
     work = p.get("work", {})
     if len(by_id) != len(claims):
@@ -241,8 +338,15 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
             entry["scope"] = stale[cid] + ". The linked log is historical."
             entry["summary"] = m.get("summary", "The paper claim is awaiting a fresh Lean check.")
             status = "awaiting recheck"
-        entry["status"] = status
-        if c["kind"] != "conjecture" and status == "closed":
+        approval = None
+        if status == "closed":
+            approval, changed_definitions = approval_state(approvals.get(cid), audit)
+            if changed_definitions:
+                withdrawn.append(f'{cid} (approved by {approvals[cid]["by"]}; changed: {", ".join(changed_definitions)})')
+            if not approval:
+                awaiting_approval.append(cid)
+        entry["status"] = status if approval or status != "closed" else "awaiting approval"
+        if c["kind"] != "conjecture" and approval:
             closed_results += 1
         entry.setdefault("reference", c["kind"].title())
         subproofs = []
@@ -263,12 +367,17 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
                  "Lean checked" if checked else "Awaiting Lean recheck" if changed else
                  "Subproofs checked" if has_parts else "No completed Lean check")
         verification = {"label": label}
+        if checked:
+            verification["approval"] = ("Statement approved by " + approval["by"] if approval
+                                        else "Statement not yet approved")
+            verification["approved"] = bool(approval)
         if checked and p.get("hosting", {}).get("lean_ci") == "enabled":
             verification["remote"] = "No GitHub verification for this revision"
             verification["url"] = p["hosting"]["repository"] + "/actions/workflows/verify-lean.yml"
             record = ci["claims"].get(cid) if ci else None
             if (record and record.get("audit_sha256") == hashlib.sha256(receipt).hexdigest()
                     and all(record.get(k) == audit[k] for k in ("expected", "declaration", "toolchain"))
+                    and record.get("statement_sha256") == audit.get("statement", {}).get("sha256")
                     and set(record["axioms"]) == set(audit["axioms"])):
                 verification.update(remote="Machine verified on GitHub",
                                     url=f'{p["hosting"]["repository"]}/actions/runs/{ci["run_id"]}/attempts/{ci["attempt"]}',
@@ -296,6 +405,8 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         url = "proofs/index.html#/claim/" + quote(cid, safe="")
         target = ' <strong class="proof-target">Current proof target</strong>' if cid == p.get("focus") else ''
         badge = f' · <a href="{url}?view=lean">{esc(label)}</a>'
+        if "approval" in verification:
+            badge += f' · <span class="approval{" approved" if verification["approved"] else ""}">{esc(verification["approval"])}</span>'
         if "evidence" in verification:
             badge += f' <a class="verified-badge" href="{esc(verification["url"])}">&#10003; {esc(verification["remote"])}</a>'
             badge += f' · <a href="{esc(verification["evidence"])}">Verification record</a>'
@@ -304,7 +415,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
                           'GitHub artifact (sign-in required)</a>')
         elif "remote" in verification:
             badge += f' · <a href="{esc(verification["url"])}">{esc(verification["remote"])}</a>'
-        rows.append(f'<li data-claim="{esc(cid)}"><a href="{url}">{esc(entry["reference"])} · {esc(c["title"])}</a> · {esc(status)}{badge}{target}<span class="claim-activity"></span></li>')
+        rows.append(f'<li data-claim="{esc(cid)}"><a href="{url}">{esc(entry["reference"])} · {esc(c["title"])}</a> · {esc(entry["status"])}{badge}{target}<span class="claim-activity"></span></li>')
     if ci:
         (output / "logs").mkdir(exist_ok=True)
         atomic(output / "logs/lean-verification.json", Path(ci_receipt).read_bytes())
@@ -323,7 +434,8 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     feed = p.get("hosting", {}).get("activity_url", "")
     total_results = sum(c["kind"] != "conjecture" for c in claims)
     scope = proof_work_description(p, claims, closed_results=closed_results)
-    dashboard = heading + f'<section id="claim-inventory" data-feed="{esc(feed)}"><h2>Claim inventory</h2><p><strong>Authorized proof work</strong><br>{esc(scope)}</p><p>{closed_results} of {total_results} stated results closed</p><ol>' + "".join(rows) + '</ol></section>' + active
+    pending = f" · {len(awaiting_approval)} Lean checked, awaiting the author's statement approval" if awaiting_approval else ""
+    dashboard = heading + f'<section id="claim-inventory" data-feed="{esc(feed)}"><h2>Claim inventory</h2><p><strong>Authorized proof work</strong><br>{esc(scope)}</p><p>{closed_results} of {total_results} stated results closed{pending}</p><ol>' + "".join(rows) + '</ol></section>' + active
     payload = dict(title=p["title"], focus=focus, claims=entries, dependencies=edges, macros=materials.get("macros", {}))
     template = (assets / "explorer.html").read_text(encoding="utf-8-sig")
     packed = json.dumps(payload, ensure_ascii=False)
@@ -336,6 +448,8 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         v = entry["verification"]
         mark = (f'<a class="verified-badge" href="{esc(v["url"])}">✓ {esc(v["remote"])}</a>'
                 if v.get("evidence") else f'<a class="status" href="{link}?view=lean">{esc(v["label"])}</a>')
+        if "approval" in v:
+            mark = f'<span class="marks">{mark}<span class="status approval{" approved" if v["approved"] else ""}">{esc(v["approval"])}</span></span>'
         contents.append(f'<li><a class="toc-claim" href="{link}"><small>{esc(entry["reference"])}</small>'
                         f'<strong>{esc(entry["title"])}</strong></a>{mark}</li>')
     explorer = (template.replace("__MAST__", mast).replace("__TITLE__", esc(p["title"]))
@@ -369,6 +483,11 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     atomic(output / "checkpoint.json", json.dumps(dict(revision=version)).encode())
     print(f"{len(claims)} claims | {output / 'progress.html'}")
     print(f"Authorized proof work: {scope}")
+    for item in withdrawn:
+        print(f"Statement approval withdrawn: {item}")
+    if awaiting_approval:
+        print(f"Lean checked, awaiting the author's statement approval: {', '.join(awaiting_approval)}. "
+              f"Ask the author to run: python <skill>/scripts/atlas.py approve {root} --by \"<name>\"")
     hosting = p.get("hosting") or {}
     if not hosting.get("repository") and hosting.get("decision") != "local":
         print("Hosting decision pending. Ask where the author wants this paper's explorer and dashboard hosted.")
@@ -376,13 +495,18 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["build"])
+    parser.add_argument("operation", choices=["build", "approve"])
     parser.add_argument("project", type=Path)
+    parser.add_argument("claims", nargs="*", help="approve: claim labels (default: every closed claim awaiting approval)")
+    parser.add_argument("--by", help="approve: the author approving the statements. Only the author runs approve")
     parser.add_argument("--ci-receipt", type=Path, help="Evidence downloaded from the trusted Lean workflow")
     parser.add_argument("--commit", help="Git revision being rendered")
     parser.add_argument("--artifact-id", type=int, help="ID of the GitHub artifact containing the supplied CI receipt")
     args = parser.parse_args()
     try:
-        build(args.project.resolve(), ci_receipt=args.ci_receipt, commit=args.commit, artifact_id=args.artifact_id)
+        if args.operation == "approve":
+            approve(args.project.resolve(), args.claims, args.by or "")
+        else:
+            build(args.project.resolve(), ci_receipt=args.ci_receipt, commit=args.commit, artifact_id=args.artifact_id)
     except (ValueError, KeyError, OSError) as exc:
         sys.exit(f"Proof Atlas: {exc}")

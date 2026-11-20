@@ -31,6 +31,7 @@ main {max-width:90rem;margin:auto;padding:1.6rem clamp(1rem,4.5vw,4.5rem) 4rem}
 summary {color:var(--accent);cursor:pointer} pre {white-space:pre-wrap;overflow-wrap:anywhere;background:var(--wash);padding:1rem;font: .85rem/1.45 var(--mono)}
 .verified-badge,.proof-target {display:inline-block;width:fit-content;padding:.14rem .45rem;font:600 .77rem/1.4 var(--sans);border:1px solid #a6c4b1;background:#ebf2e9;color:var(--green);border-radius:3px;text-decoration:none}
 .proof-target {background:#f9e9d6;color:#724321;border-color:#dac4a7}
+.approval {color:#724321}.approval.approved {color:var(--green)}
 .dashboard .paper {border-bottom:3px double var(--rule);padding-bottom:.3rem}
 .dashboard section {margin:1.6rem 0}
 .dashboard #claim-inventory>p {font: .94rem/1.5 var(--sans)}

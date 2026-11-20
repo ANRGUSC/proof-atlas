@@ -39,6 +39,7 @@ function fillList(selected) {
     a.append(el("small",c.reference),el("span",c.title));
     if(c.verification.evidence) a.append(el("small","✓ Machine verified on GitHub","verified-badge"));
     else a.append(el("small", [c.verification.label, c.verification.remote].filter(Boolean).join(" · ")));
+    if(c.verification.approval) a.append(el("small",c.verification.approval,c.verification.approved?"approval approved":"approval"));
     if(c.id===selected) a.setAttribute("aria-current","page");
     list.append(a);
   }
@@ -50,6 +51,12 @@ function relations(c, reverse=false) {
 function proofView(c,view) {
   pane.append(el("small",c.reference),el("h2",c.title));
   const v=c.verification;
+  if(v.approval){
+    // Two separate claims: Lean proved the formal statement; the author approved it as the paper's.
+    const marks=el("div",null,"lean-checks");
+    marks.append(el("span","✓ "+v.label,"status"),el("span",(v.approved?"✓ ":"")+v.approval,v.approved?"approval approved":"approval"));
+    pane.append(marks);
+  }
   if(v.evidence){
     const proof=el("div",null,"lean-checks");
     proof.append(link("✓ "+v.remote,v.url,"verified-badge"));
@@ -91,6 +98,7 @@ function proofView(c,view) {
   } else {
     const checks=el("div",null,"lean-checks");
     checks.append(el("strong",c.verification.label));
+    if(v.approval) checks.append(el("strong",v.approval));
     if(c.audit_log) checks.append(link("Declaration and axiom audit",c.audit_log));
     if(c.log) checks.append(link("Lean run log",c.log));
     if(v.remote && !v.evidence) checks.append(link(v.remote,v.url));
