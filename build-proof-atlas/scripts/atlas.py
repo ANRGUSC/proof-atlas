@@ -300,7 +300,8 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
             badge += f' <a class="verified-badge" href="{esc(verification["url"])}">&#10003; {esc(verification["remote"])}</a>'
             badge += f' · <a href="{esc(verification["evidence"])}">Verification record</a>'
             if "artifact" in verification:
-                badge += f' · <a href="{esc(verification["artifact"])}">GitHub artifact</a>'
+                badge += (f' · <a href="{esc(verification["artifact"])}" data-artifact-record="{esc(verification["evidence"])}">'
+                          'GitHub artifact (sign-in required)</a>')
         elif "remote" in verification:
             badge += f' · <a href="{esc(verification["url"])}">{esc(verification["remote"])}</a>'
         rows.append(f'<li data-claim="{esc(cid)}"><a href="{url}">{esc(entry["reference"])} · {esc(c["title"])}</a> · {esc(status)}{badge}{target}<span class="claim-activity"></span></li>')
@@ -342,7 +343,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
                 .replace("__FEATURE__", feature).replace("__COUNT__", str(len(entries)))
                 .replace("__CONTENTS__", "".join(contents)))
     digest = hashlib.sha256((packed + dashboard + explorer).encode())
-    for name in ("explorer.js", "explorer.css", "graph.js", "graph.css", "style.css", "live.js", "activity.js"):
+    for name in ("explorer.js", "explorer.css", "graph.js", "graph.css", "style.css", "live.js", "activity.js", "artifact.js"):
         digest.update((assets / name).read_bytes())
         atomic(output / name, (assets / name).read_bytes())
     version = digest.hexdigest()
@@ -361,7 +362,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     atomic(output / "preview-status.json", b'{}')
     if not (output / "activity.json").exists():
         atomic(output / "activity.json", b'{"runs":[]}')
-    atomic(output / "progress.html", page("Proof progress", mast, dashboard, watch + '<script src="activity.js" defer></script>'))
+    atomic(output / "progress.html", page("Proof progress", mast, dashboard, watch + '<script src="activity.js" defer></script><script src="artifact.js" defer></script>'))
     atomic(output / "manuscript.pdf", pdf)
     shutil.copyfile(Path(__file__).resolve().parents[1] / "assets/style.css", output / "style.css")
     atomic(output / "inventory.json", json.dumps(claims, ensure_ascii=False, indent=2).encode())

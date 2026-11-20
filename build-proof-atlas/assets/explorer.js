@@ -53,8 +53,12 @@ function proofView(c,view) {
   if(v.evidence){
     const proof=el("div",null,"lean-checks");
     proof.append(link("✓ "+v.remote,v.url,"verified-badge"));
-    if(v.artifact) proof.append(link("GitHub artifact",v.artifact));
     proof.append(link("Verification record · "+v.commit.slice(0,7),v.evidence));
+    if(v.artifact){
+      const download=link("GitHub artifact (sign-in required)",v.artifact);
+      download.dataset.artifactRecord=v.evidence;
+      proof.append(download);
+    }
     pane.append(proof);
   }
   pane.append(link("Show in dependency graph",route(c.id,"english",true),"graph-link"));
