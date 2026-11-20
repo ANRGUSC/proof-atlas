@@ -30,3 +30,7 @@ For a smaller first pass, name one theorem and ask the agent to stop after check
 4. **Choose how to share it.** Keep the atlas local or choose a GitHub repository and GitHub Pages. GitHub verification is a separate opt-in. **Lean checked** identifies a locally audited claim. **Machine verified on GitHub** links to an independent check of that claim at the published revision.
 
 The reusable renderer and workflows live in this repository. Each paper keeps its manuscript, Lean sources, checkpoints, and evidence in its own project. [Skill instructions and setup commands](build-proof-atlas/SKILL.md).
+
+## Credits
+
+Scott Moeller and Bhaskar Krishnamachari created Proof Atlas.
