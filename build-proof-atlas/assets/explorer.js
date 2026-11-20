@@ -37,6 +37,7 @@ function fillList(selected) {
     if (!(c.reference+" "+c.title+" "+c.id).toLowerCase().includes(term)) continue;
     const a=link("",route(c.id),"claim-choice");
     a.append(el("small",c.reference),el("span",c.title));
+    a.append(el("small", [c.verification.label, c.verification.remote].filter(Boolean).join(" · ")));
     if(c.id===selected) a.setAttribute("aria-current","page");
     list.append(a);
   }
@@ -75,6 +76,13 @@ function proofView(c,view) {
     if(c.structured){const note=el("details");note.open=!c.steps;note.append(el("summary","Pilot supplement"),el("pre",c.structured));pane.append(note);}
     if(!c.steps && !c.structured) pane.append(el("p",c.kind==="conjecture"?"This conjecture has no recorded proof.":"No structured argument has been imported yet."));
   } else {
+    const checks=el("div",null,"lean-checks");
+    checks.append(el("strong",c.verification.label));
+    if(c.audit_log) checks.append(link("Declaration and axiom audit",c.audit_log));
+    if(c.log) checks.append(link("Lean run log",c.log));
+    if(c.verification.remote) checks.append(link(c.verification.remote,c.verification.url));
+    if(c.verification.evidence) checks.append(link("Verification record · "+c.verification.commit.slice(0,7),c.verification.evidence));
+    pane.append(checks);
     pane.append(rich(c.scope || "No Lean formalization has been selected for this claim."));
     if(c.subproofs?.length){
       const list=el("ol");
@@ -86,8 +94,6 @@ function proofView(c,view) {
       pane.append(el("h3","Subproofs"),list);
     }
     for(const source of c.sources){pane.append(el("h3",source.path),el("pre",source.text));}
-    if(c.log) pane.append(link("Inspect Lean run log",c.log));
-    if(c.audit_log) pane.append(link("Inspect the declaration and axiom audit",c.audit_log));
   }
 }
 function render(){

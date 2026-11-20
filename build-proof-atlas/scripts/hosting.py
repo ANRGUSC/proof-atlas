@@ -109,6 +109,8 @@ def main():
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--github", metavar="OWNER/REPO")
     actions.add_argument("--local", action="store_true")
+    actions.add_argument("--lean-ci", action="store_true", help="Record approval and install the Lean verification workflow")
+    actions.add_argument("--no-lean-ci", action="store_true", help="Record a local-checks-only choice")
     actions.add_argument("--publish", action="store_true", help="Publish the committed paper project to its approved GitHub destination")
     parser.add_argument("--visibility", choices=["public", "private"])
     pages = parser.add_mutually_exclusive_group()
@@ -141,12 +143,27 @@ def main():
             choice.pop("activity_url", None)
     if args.local:
         choice = {"decision":"local"}
-    if args.github or args.local:
+    if args.lean_ci or args.no_lean_ci:
+        if not choice.get("repository"):
+            parser.error("Choose a GitHub repository first")
+        workflow = root / ".github/workflows/verify-lean.yml"
+        template = Path(__file__).resolve().parents[1] / "references/verify-lean.yml"
+        if args.lean_ci:
+            if workflow.exists() and workflow.read_text(encoding="utf-8") != template.read_text(encoding="utf-8"):
+                parser.error("Existing verify-lean.yml differs. Integrate per-claim verification into that workflow and record the decision.")
+            workflow.parent.mkdir(parents=True, exist_ok=True)
+            atomic(workflow, template.read_bytes())
+        elif workflow.exists():
+            parser.error("An existing verification workflow is installed. Review its triggers before disabling it.")
+        choice["lean_ci"] = "enabled" if args.lean_ci else "declined"
+    if args.github or args.local or args.lean_ci or args.no_lean_ci:
         project["hosting"] = choice
         atomic(path, (json.dumps(project, indent=2, ensure_ascii=False)+"\n").encode())
     print(json.dumps(choice, indent=2))
     if choice.get("decision") == "pending":
         print("Ask the author where to host this paper's explorer and dashboard. Continue local work while waiting.")
+    elif choice.get("repository") and not choice.get("lean_ci"):
+        print("Ask whether GitHub Actions should independently verify the Lean claims and publish per-claim evidence.")
 
 
 if __name__ == "__main__":

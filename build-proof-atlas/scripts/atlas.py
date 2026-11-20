@@ -104,8 +104,22 @@ def proof_work_description(project, claims, *, closed_results=None):
     return text
 
 
-def build(root):
+def github_verification(project, receipt_path, commit):
+    if not receipt_path or project.get("hosting", {}).get("lean_ci") != "enabled":
+        return None
+    data = json.loads(Path(receipt_path).read_bytes())
+    repository = project["hosting"]["repository"]
+    if (not re.fullmatch(r"[0-9a-f]{40}", commit or "") or data.get("commit") != commit
+            or not re.fullmatch(r"[\w.-]+/[\w.-]+", data.get("repository", ""))
+            or repository.casefold() != ("https://github.com/" + data["repository"]).casefold()
+            or not all(type(data.get(k)) is int and data[k] > 0 for k in ("run_id", "attempt"))):
+        return None
+    return data
+
+
+def build(root, *, ci_receipt=None, commit=None):
     p = json.loads((root / "project.json").read_text(encoding="utf-8-sig"))
+    ci = github_verification(p, ci_receipt, commit)
     if p["schema_version"] != 1 or not p["environments"]:
         raise ValueError("project.json: expected schema version 1 and theorem environments")
     claims = []
@@ -185,6 +199,23 @@ def build(root):
                     state = "awaiting recheck"
             subproofs.append(dict(part, status=state))
         entry["subproofs"] = subproofs
+        checked = status == "closed"
+        has_parts = any(part["status"] == "checked" for part in subproofs)
+        label = ("Open conjecture" if c["kind"] == "conjecture" and status == "open" else
+                 "Lean checked" if checked else "Awaiting Lean recheck" if changed else
+                 "Subproofs checked" if has_parts else "No completed Lean check")
+        verification = {"label": label}
+        if checked and p.get("hosting", {}).get("lean_ci") == "enabled":
+            verification["remote"] = "No GitHub verification for this revision"
+            verification["url"] = p["hosting"]["repository"] + "/actions/workflows/verify-lean.yml"
+            record = ci["claims"].get(cid) if ci else None
+            if (record and record.get("audit_sha256") == hashlib.sha256(receipt).hexdigest()
+                    and all(record.get(k) == audit[k] for k in ("expected", "declaration", "toolchain"))
+                    and set(record["axioms"]) == set(audit["axioms"])):
+                verification.update(remote="Machine verified on GitHub",
+                                    url=f'{p["hosting"]["repository"]}/actions/runs/{ci["run_id"]}/attempts/{ci["attempt"]}',
+                                    commit=ci["commit"], evidence="logs/lean-verification.json")
+        entry["verification"] = verification
         if subproofs:
             items = "".join(f'<li>{esc(part["title"])} · {esc(part["status"])}</li>' for part in subproofs)
             subproof_lists[cid] = f"<h3>Subproofs</h3><ol>{items}</ol>"
@@ -204,7 +235,13 @@ def build(root):
         entries.append(entry)
         url = "proofs/index.html#/claim/" + quote(cid, safe="")
         target = ' <strong class="proof-target">Current proof target</strong>' if cid == p.get("focus") else ''
-        rows.append(f'<li data-claim="{esc(cid)}"><a href="{url}">{esc(entry["reference"])} · {esc(c["title"])}</a> · {esc(status)}{target}<span class="claim-activity"></span></li>')
+        badge = f' · <a href="{url}?view=lean">{esc(label)}</a>'
+        if "remote" in verification:
+            badge += f' · <a href="{esc(verification["url"])}">{esc(verification["remote"])}</a>'
+        rows.append(f'<li data-claim="{esc(cid)}"><a href="{url}">{esc(entry["reference"])} · {esc(c["title"])}</a> · {esc(status)}{badge}{target}<span class="claim-activity"></span></li>')
+    if ci:
+        (output / "logs").mkdir(exist_ok=True)
+        atomic(output / "logs/lean-verification.json", Path(ci_receipt).read_bytes())
     sources = edition_links(p)
     heading = f'<p>Proof Atlas · Maintainer dashboard</p><h1>{esc(p["title"])}</h1><p>{sources}</p>'
     focus = p.get("focus")
@@ -254,8 +291,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=["build"])
     parser.add_argument("project", type=Path)
+    parser.add_argument("--ci-receipt", type=Path, help="Evidence downloaded from the trusted Lean workflow")
+    parser.add_argument("--commit", help="Git revision being rendered")
     args = parser.parse_args()
     try:
-        build(args.project.resolve())
+        build(args.project.resolve(), ci_receipt=args.ci_receipt, commit=args.commit)
     except (ValueError, KeyError, OSError) as exc:
         sys.exit(f"Proof Atlas: {exc}")

@@ -26,7 +26,7 @@ class DashboardCompletion(unittest.TestCase):
             (root / "lean").mkdir()
             checked = source("lean/T.lean", b"theorem result : True := True.intro\n")
             (root / "run.log").write_bytes(b"Built T\n")
-            audit = {"expected": "True", "declaration": "result", "axioms": [],
+            audit = {"expected": "True", "declaration": "result", "axioms": [], "toolchain": "test-pin",
                      "checked_inputs": {"T.lean": checked["sha256"]}}
             (root / "audit.json").write_text(json.dumps(audit), encoding="utf-8")
             closure = {"expected": "True", "declaration": "result", "package": "lean",
@@ -39,15 +39,33 @@ class DashboardCompletion(unittest.TestCase):
                                "run_log": "run.log", "checked_inputs": {checked["path"]: checked["sha256"]}}},
             }
 
-            def dashboard():
+            def dashboard(**options):
                 (root / "project.json").write_text(json.dumps(project), encoding="utf-8")
-                atlas.build(root)
+                atlas.build(root, **options)
                 return (root / "dist/progress.html").read_text(encoding="utf-8")
 
             complete = "Paper-wide proof work complete"
             current = dashboard()
             self.assertIn("1 of 1 stated results closed", current)
             self.assertIn(complete, current)
+            self.assertIn("Lean checked", current)
+            self.assertNotIn("Machine verified on GitHub", current)
+
+            project["hosting"] = {"repository": "https://github.com/example/paper", "lean_ci": "enabled"}
+            revision = "a" * 40
+            record = {"repository": "example/paper", "commit": revision, "run_id": 123, "attempt": 2,
+                      "claims": {"t": dict(audit, audit_sha256=hashlib.sha256((root / "audit.json").read_bytes()).hexdigest())}}
+            path = root / "remote.json"
+            path.write_text(json.dumps(record), encoding="utf8")
+            options = dict(ci_receipt=path, commit=revision)
+            verified = dashboard(**options)
+            self.assertEqual(verified.count("Machine verified on GitHub"), 1)
+            self.assertIn("example/paper/actions/runs/123/attempts/2", verified)
+            self.assertEqual((root / "dist/logs/lean-verification.json").read_bytes(), path.read_bytes())
+            self.assertNotIn("Machine verified on GitHub", dashboard(ci_receipt=path, commit="b"*40))
+            record["claims"]["t"]["audit_sha256"] = "0"*64
+            path.write_text(json.dumps(record), encoding="utf8")
+            self.assertNotIn("Machine verified on GitHub", dashboard(**options))
 
             project["proof_work"] = {"mode": "claim", "claim": "t"}
             self.assertNotIn(complete, dashboard())

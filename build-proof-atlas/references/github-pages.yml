@@ -3,9 +3,14 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Verify Lean claims"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: proof-atlas-pages
@@ -17,7 +22,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build explorer and dashboard from project records
-        run: python3 tools/proof-atlas/scripts/atlas.py build .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=()
+          if python3 -c 'import json,sys; sys.exit(json.load(open("project.json")).get("hosting",{}).get("lean_ci") != "enabled")'; then
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/verify-lean.yml/runs?branch=main&head_sha=$GITHUB_SHA&per_page=30" --jq '.workflow_runs | map(select(.event=="push" or .event=="workflow_dispatch")) | first | select(.conclusion=="success") | [.id,.run_attempt] | @tsv') || runs=""
+            if [[ -n "$runs" ]]; then
+              read -r id attempt <<< "$runs"
+              if gh run download "$id" --name "lean-verification-$GITHUB_SHA-$attempt" --dir "$RUNNER_TEMP/atlas-evidence"; then
+                args=(--ci-receipt "$RUNNER_TEMP/atlas-evidence/lean-verification.json" --commit "$GITHUB_SHA")
+              fi
+            fi
+          fi
+          python3 tools/proof-atlas/scripts/atlas.py build . "${args[@]}"
       - name: Check publication files and evidence links
         run: |
           python3 - <<'PY'

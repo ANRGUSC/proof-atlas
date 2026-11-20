@@ -13,3 +13,4 @@
 @media(max-width:760px){.workspace {grid-template-columns:1fr;gap:1rem}.mast {align-items:flex-start;flex-direction:column}.mast nav {gap:.85rem}.workspace aside #claim-list {max-height:10rem;overflow:auto}.relations {grid-template-columns:1fr}.views a{padding:.45rem}.paper h1{font-size:1.65rem}}
 
 .paper a {color:inherit;text-underline-offset:.18em}
+.lean-checks {display:flex; flex-wrap:wrap; gap:.4rem 1rem; align-items:baseline; padding:.8rem 0; border-bottom:1px solid #ced9cf}

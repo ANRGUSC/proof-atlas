@@ -1,0 +1,33 @@
+name: Verify Lean claims
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: atlas-lean-main
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      LEAN_NUM_THREADS: '2'
+      MATHLIB_NO_CACHE_ON_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Elan for the project's pinned Lean toolchains
+        run: |
+          curl --fail --silent --show-error --location https://elan.lean-lang.org/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
+          sh "$RUNNER_TEMP/elan-init.sh" -y --no-modify-path --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Build proof modules and type-check each claim against its statement
+        run: python3 tools/proof-atlas/scripts/verify_ci.py "$RUNNER_TEMP/lean-verification.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lean-verification-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lean-verification.json
+          if-no-files-found: error
