@@ -59,7 +59,8 @@ def verify(root):
                                             expected=prior["expected"], declaration=prior["declaration"]))
             result["claims"][label] = dict(audit_sha256=digest, declaration=checked["declaration"],
                                             expected=checked["expected"], axioms=checked["axioms"],
-                                            toolchain=checked["toolchain"])
+                                            toolchain=checked["toolchain"],
+                                            statement_sha256=checked["statement"]["sha256"])
     return result
 
 

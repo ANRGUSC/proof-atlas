@@ -60,6 +60,51 @@ class AuditClosure(unittest.TestCase):
             self.assertEqual(fallback["input_scope"], "full-package")
             self.assertIn("Pkg/Unrelated.lean", fallback["checked_inputs"])
 
+    def test_statement_digest_follows_definitions_not_proofs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pin = os.environ["ELAN_TOOLCHAIN"]
+            (root/"lean-toolchain").write_text(pin)
+            (root/"lakefile.toml").write_text('name = "Example"\n[[lean_lib]]\nname = "Pkg"\n')
+            (root/"Pkg").mkdir()
+            defs = "def rate (n : Nat) : Nat := n + 1\ndef Statement : Prop := ∀ n, rate n > n\n"
+            sources = {
+                "Pkg/Defs.lean": defs,
+                "Pkg/Proof.lean": "import Pkg.Defs\ntheorem main : Statement := by\n  intro n; unfold rate; exact Nat.lt_succ_self n\n",
+                "Contract.lean": "import Pkg.Defs\nimport Pkg.Proof\n",
+            }
+            for name, body in sources.items():
+                (root/name).write_text(body, encoding="utf-8")
+            env = os.environ.copy()
+            lake = audit_lean.select_lake(root, pin, env, sys.stderr, offline=True)
+            subprocess.run([*lake, "update"], cwd=root, env=env, check=True)
+            args = SimpleNamespace(package=root, contract="Contract.lean", expected="Statement",
+                                   declaration="main", target=["Pkg.Proof"])
+
+            def statement():
+                return audit_lean.audit(args)["statement"]
+
+            def edit(name, old, new):
+                path = root/name
+                path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+
+            first = statement()
+            self.assertEqual({c["name"]: c["file"] for c in first["constants"]},
+                             {"Statement": "Pkg/Defs.lean", "rate": "Pkg/Defs.lean"})
+            self.assertEqual(first["constants"][0]["lines"], [2, 2])
+            # Proofs are outside the approved statement.
+            edit("Pkg/Proof.lean", "exact Nat.lt_succ_self n", "omega")
+            self.assertEqual(statement()["sha256"], first["sha256"])
+            # Comments, layout and bound-variable names are outside it too.
+            edit("Pkg/Defs.lean", "def rate (n : Nat) : Nat := n + 1", "-- the rate\ndef rate  (m : Nat) : Nat :=\n  m + 1")
+            self.assertEqual(statement()["sha256"], first["sha256"])
+            # A definition the statement unfolds to is inside it.
+            edit("Pkg/Defs.lean", "m + 1", "m + 2")
+            changed = statement()
+            self.assertNotEqual(changed["sha256"], first["sha256"])
+            before = {c["name"]: c["sha256"] for c in first["constants"]}
+            self.assertEqual([c["name"] for c in changed["constants"] if c["sha256"] != before[c["name"]]], ["rate"])
+
 
 if __name__ == "__main__":
     unittest.main()
