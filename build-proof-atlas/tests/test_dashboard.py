@@ -57,10 +57,11 @@ class DashboardCompletion(unittest.TestCase):
                       "claims": {"t": dict(audit, audit_sha256=hashlib.sha256((root / "audit.json").read_bytes()).hexdigest())}}
             path = root / "remote.json"
             path.write_text(json.dumps(record), encoding="utf8")
-            options = dict(ci_receipt=path, commit=revision)
+            options = dict(ci_receipt=path, commit=revision, artifact_id=456)
             verified = dashboard(**options)
             self.assertEqual(verified.count("Machine verified on GitHub"), 1)
             self.assertIn("example/paper/actions/runs/123/attempts/2", verified)
+            self.assertIn("example/paper/actions/runs/123/artifacts/456", verified)
             self.assertEqual((root / "dist/logs/lean-verification.json").read_bytes(), path.read_bytes())
             self.assertNotIn("Machine verified on GitHub", dashboard(ci_receipt=path, commit="b"*40))
             record["claims"]["t"]["audit_sha256"] = "0"*64

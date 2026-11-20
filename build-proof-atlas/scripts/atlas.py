@@ -117,7 +117,7 @@ def github_verification(project, receipt_path, commit):
     return data
 
 
-def build(root, *, ci_receipt=None, commit=None):
+def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     p = json.loads((root / "project.json").read_text(encoding="utf-8-sig"))
     ci = github_verification(p, ci_receipt, commit)
     if p["schema_version"] != 1 or not p["environments"]:
@@ -215,6 +215,8 @@ def build(root, *, ci_receipt=None, commit=None):
                 verification.update(remote="Machine verified on GitHub",
                                     url=f'{p["hosting"]["repository"]}/actions/runs/{ci["run_id"]}/attempts/{ci["attempt"]}',
                                     commit=ci["commit"], evidence="logs/lean-verification.json")
+                if artifact_id and artifact_id > 0:
+                    verification["artifact"] = f'{p["hosting"]["repository"]}/actions/runs/{ci["run_id"]}/artifacts/{artifact_id}'
         entry["verification"] = verification
         if subproofs:
             items = "".join(f'<li>{esc(part["title"])} · {esc(part["status"])}</li>' for part in subproofs)
@@ -236,7 +238,12 @@ def build(root, *, ci_receipt=None, commit=None):
         url = "proofs/index.html#/claim/" + quote(cid, safe="")
         target = ' <strong class="proof-target">Current proof target</strong>' if cid == p.get("focus") else ''
         badge = f' · <a href="{url}?view=lean">{esc(label)}</a>'
-        if "remote" in verification:
+        if "evidence" in verification:
+            badge += f' <a class="verified-badge" href="{esc(verification["url"])}">&#10003; {esc(verification["remote"])}</a>'
+            badge += f' · <a href="{esc(verification["evidence"])}">Verification record</a>'
+            if "artifact" in verification:
+                badge += f' · <a href="{esc(verification["artifact"])}">GitHub artifact</a>'
+        elif "remote" in verification:
             badge += f' · <a href="{esc(verification["url"])}">{esc(verification["remote"])}</a>'
         rows.append(f'<li data-claim="{esc(cid)}"><a href="{url}">{esc(entry["reference"])} · {esc(c["title"])}</a> · {esc(status)}{badge}{target}<span class="claim-activity"></span></li>')
     if ci:
@@ -293,8 +300,9 @@ if __name__ == "__main__":
     parser.add_argument("project", type=Path)
     parser.add_argument("--ci-receipt", type=Path, help="Evidence downloaded from the trusted Lean workflow")
     parser.add_argument("--commit", help="Git revision being rendered")
+    parser.add_argument("--artifact-id", type=int, help="ID of the GitHub artifact containing the supplied CI receipt")
     args = parser.parse_args()
     try:
-        build(args.project.resolve(), ci_receipt=args.ci_receipt, commit=args.commit)
+        build(args.project.resolve(), ci_receipt=args.ci_receipt, commit=args.commit, artifact_id=args.artifact_id)
     except (ValueError, KeyError, OSError) as exc:
         sys.exit(f"Proof Atlas: {exc}")

@@ -16,3 +16,4 @@ li {margin:.4rem 0}
 .proof-target {font-size:.8rem;color:#075749;background:#e3f2eb;padding:.15rem .45rem;border-radius:.25rem}
 .claim-activity {display:block;white-space:pre-line;color:#465d55;font-size:.9rem}
 .working .claim-activity {color:#075749;font-weight:650}
+.verified-badge {display:inline-block; width:fit-content; color:#115c37; background:#e4f4e9; border:1px solid #9cccaf; border-radius:.35rem; padding:.15em .5em; font-weight:700; text-decoration:none} a.verified-badge:hover,a.verified-badge:focus-visible {text-decoration:underline}
