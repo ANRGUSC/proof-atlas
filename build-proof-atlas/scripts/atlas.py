@@ -92,6 +92,11 @@ def build(root):
     work = p.get("work", {})
     if len(by_id) != len(claims):
         raise ValueError("duplicate claim label across manuscript sources")
+    if "claim_order" in p:
+        order = p["claim_order"]
+        if len(order) != len(claims) or set(order) != set(by_id):
+            raise ValueError("claim_order must list every manuscript claim exactly once")
+        claims = [by_id[label] for label in order]
     if work.keys() - by_id.keys() or (p.get("focus") and p["focus"] not in by_id):
         raise ValueError("checkpoint or focus refers to an unknown claim label")
     pdf = read_source(root, p["pdf"])
@@ -173,6 +178,9 @@ def build(root):
     atomic(output / "inventory.json", json.dumps(claims, ensure_ascii=False, indent=2).encode())
     atomic(output / "checkpoint.json", json.dumps(dict(revision=version)).encode())
     print(f"{len(claims)} claims | {output / 'progress.html'}")
+    hosting = p.get("hosting") or {}
+    if not hosting.get("repository") and hosting.get("decision") != "local":
+        print("Hosting decision pending. Ask where the author wants this paper's explorer and dashboard hosted.")
 
 
 if __name__ == "__main__":

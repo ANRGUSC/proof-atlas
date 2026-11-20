@@ -2,7 +2,7 @@
 name: build-proof-atlas
 description: Build or resume a source-linked proof atlas from a theory paper, open a four-view Proof Atlas explorer and a live progress dashboard, and expose the distinction between paper claims, proof attempts and checked results.
 metadata:
-  version: "0.4.0"
+  version: "0.5.0"
 ---
 
 # Build a Proof Atlas
@@ -12,6 +12,13 @@ Bind the requested edition first. Compare the title, version, TeX and PDF. Recor
 Record the edition's canonical HTTP(S) URL in `project.json` as `publication` and its human-readable citation in `edition`. Each build links that citation and the exact bundled manuscript PDF in the explorer and dashboard headers. When hosting is configured or moved, refresh the paper repository's renderer snapshot (or pinned release), rebuild, and verify both header links from the deployed explorer and dashboard. The PDF link resolves under the site's own base path. For an unpublished manuscript, leave the citation as text and keep the PDF link active.
 
 ## Start a project
+
+For arXiv, run `python <skill>/scripts/import_arxiv.py <arxiv-url> <new-project>`. It resolves the edition, downloads and hashes the source and PDF, follows literal TeX inputs, inventories labeled claims, and builds both views. A cached edition can be imported using its versioned ID, `--title`, `--archive` and `--pdf`. If multiple main files exist, select one with `--main`. On resume, open the existing project instead of importing again.
+
+Read `import-review.json`. The importer matches unique named headings to PDF pages when pdftotext or PyMuPDF is available. Verify those matches and fill unmatched pages. Review proof citations and equations in context before adding justified edges to `reader.json`; citations in adjacent proofs are only candidates. Reconcile custom environments, unlabeled claims, detached proofs, macro-based includes, and any unvisited sources. The first generated reader is an inventory for further work.
+
+Check `python <skill>/scripts/hosting.py <project>` on first import and resume. A pending decision calls for a user-facing question, including during tests on a real paper. Continue local builds while waiting. Once the author replies, record the answer with `--local` or `--github OWNER/REPO --visibility public --pages` (use the chosen visibility and Pages option). Local-only requires an explicit choice. When GitHub publication is authorized, stage the selected files and workflow, review and commit them on main, then run `hosting.py <project> --publish`. Follow the triggered deployment to completion and verify the live URLs.
+
 
 **Ask where the author wants to host this paper's Proof Atlas.** At first setup, propose a specific repository based on the paper slug and any organization the author already named. Ask only for unresolved choices: owner/repository, visibility, and whether to publish the reader and dashboard as a website. Offer local-only when hosting has not been requested. Accept a custom destination or an existing repository. Continue the local import and preview while waiting. Reuse a previously chosen destination on resume. Keep the reusable skill independently distributable.
 
@@ -28,6 +35,9 @@ The preview produces the reader at `dist/proofs/index.html` and the separate das
 **Populate the public explorer.** Optional `reader` in project.json points to a UTF-8 JSON object with `schema_version: 1`, a `claims` mapping keyed by label, and a `dependencies` list. Claim metadata can include a printed `reference`, checked PDF `page`, `summary`, `sketch`, project-relative `lamport` Markdown file, `origin`, and `source_url`. Preserve existing structured proofs and their provenance. Edges contain `claim`, `prerequisite`, and `reason`. Identify the covered mathematical step when a claim has several conclusions. Record only substantiated edges. Test a claim, graph neighbor, all four reading views, the exact PDF page and a verification log through the actual preview. On first use, also demonstrate that an open dashboard and reader reflect a saved checkpoint.
 
 ## Work on a claim
+
+For an executable evidence check, write an independent Lean contract in the package that imports the proof module and defines the intended proposition. Run `python <skill>/scripts/audit_lean.py <package> <contract.lean> <expected-proposition> <proof-declaration> --output <new-evidence.json>` after package setup. The helper builds offline, type-checks the declaration against the contract, inspects its transitive axioms, and records package-relative source hashes. Review the contract's correspondence with the paper and the pinned dependencies separately. Keep a partial result scoped to the checked subclaim.
+
 
 Start with a claim requested by the author, or one with a tractable prerequisite. Capture the intended Lean type separately from the proof. Record the hypotheses inherited from earlier passages, any stronger or weaker formalization, and which conclusions remain. Keep a subclaim attached to its parent. Maintain the manuscript statement even when a boundary case fails. Continue independent claims while recording questions for the author.
 
