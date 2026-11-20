@@ -106,11 +106,21 @@ function proofView(c,view) {
 }
 function render(){
   const state=locationState();
-  document.querySelector("#about-atlas").hidden=location.hash.startsWith("#/");
+  const home=document.body.dataset.entry==="home" && !location.hash.startsWith("#/");
+  document.querySelector("#folio-home").hidden=!home;
+  document.querySelector(".workspace").hidden=home;
+  document.querySelector(".running").hidden=home;
+  const current=home?"home":state.graph?"graph":"reader";
+  for(const a of document.querySelectorAll("[data-nav]")){
+    if(a.dataset.nav===current) a.setAttribute("aria-current","page");
+    else a.removeAttribute("aria-current");
+  }
+  document.querySelector(".citation").open=false;
   if(graphState.resize){graphState.resize.disconnect();graphState.resize=null;}
   const hadNodeFocus=document.activeElement?.closest(".graph-node");
   document.body.classList.toggle("graph-mode",state.graph);
   document.querySelector("#graph-nav").href=route(state.id || data.focus || "", "english",true);
+  if(home){document.title=data.title+" | Proof Atlas";return;}
   fillList(state.id);pane.replaceChildren();
   const c=claims.get(state.id);
   if(!c){pane.append(el("h2",claims.size?"Claim not found":"No claims imported yet"));return;}
@@ -119,4 +129,6 @@ function render(){
   document.title=(state.graph?"Dependency graph":c.reference+" · "+c.title)+" | Proof Atlas";
 }
 document.querySelector("#search").addEventListener("input",()=>fillList(locationState().id));
+const summary=document.querySelector(".feature-summary");
+if(summary) summary.replaceChildren(...rich(summary.textContent).childNodes);
 window.addEventListener("hashchange",render);render();

@@ -84,11 +84,59 @@ def inventory(text, filename, envs):
                    excerpt=text[start.start():stop], adjacent_proof=bool(proof))
 
 
-def page(title, body, watch=""):
+def claim_url(label):
+    return "proofs/index.html#/claim/" + quote(label, safe="")
+
+
+def masthead(project, first):
+    claim = claim_url(first)
+    graph = "proofs/index.html#/graph/" + quote(first, safe="")
+    return (f'<header class="mast"><a class="wordmark" href="index.html">Proof Atlas<span>.</span></a>'
+            f'<nav aria-label="Project"><a data-nav="home" href="index.html">Overview</a>'
+            f'<a data-nav="reader" href="{claim}">Claim reader</a><a data-nav="graph" id="graph-nav" href="{graph}">Dependency graph</a>'
+            '<a data-nav="progress" href="progress.html">Dashboard</a></nav>'
+            '<details id="about-atlas" class="citation"><summary>Paper &amp; citation</summary><div>'
+            f'<h2>About this atlas</h2><p>{paper_citation(project)}</p>'
+            f'<p>{esc(project.get("paper_overview", ""))}</p><p><a href="manuscript.pdf">Manuscript PDF</a></p>'
+            f'<h3>Read a proof</h3><p><a href="{claim}?view=english">Plain English</a> gives the claim and proof idea. '
+            f'<a href="{claim}?view=paper">Paper</a> opens the manuscript. <a href="{claim}?view=lamport">Lamport proof</a> '
+            f'breaks the argument into steps. <a href="{claim}?view=lean">Lean</a> shows the formal sources and check records.</p>'
+            f'<p>The <a href="{graph}">dependency graph</a> points from prerequisite to result. Whole paper includes isolated claims. '
+            'The <a href="progress.html">progress dashboard</a> tracks active work, checked claims, and verification evidence.</p>'
+            '</div></details></header>')
+
+
+def featured_result(root, output, folio, entries):
+    selected = folio.get("featured_claim")
+    if selected and not any(c["id"] == selected for c in entries):
+        raise ValueError("folio.featured_claim is absent from the inventory")
+    if not entries:
+        return "<p>No claims imported yet.</p>"
+    c = next((c for c in entries if c["id"] == selected), entries[0])
+    url = claim_url(c["id"])
+    summary = folio.get("blurb") or c.get("summary") or c.get("sketch") or ""
+    image = ""
+    fig = folio.get("figure")
+    if fig:
+        path = local(root, fig["path"])
+        if (path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"} or not fig.get("alt")
+                or not fig.get("caption") or type(fig.get("page")) is not int or fig["page"] < 1):
+            raise ValueError("folio.figure needs a raster image, alt text, caption and one-based manuscript page")
+        content = path.read_bytes()
+        name = "folio-" + hashlib.sha256(content).hexdigest()[:16] + path.suffix.lower()
+        atomic(output / name, content)
+        image = (f'<figure><a href="manuscript.pdf#page={fig["page"]}"><img src="{name}" alt="{esc(fig["alt"])}"></a>'
+                 f'<figcaption>{esc(fig["caption"])} <a href="manuscript.pdf#page={fig["page"]}">Manuscript, p. {fig["page"]}</a></figcaption></figure>')
+    return (f'<section class="feature"><div><small>Featured result · {esc(c["reference"])}</small>'
+            f'<h2><a href="{url}">{esc(c["title"])}</a></h2><p class="feature-summary">{esc(summary)}</p>'
+            f'<a class="read-proof" href="{url}">Read the claim →</a></div>{image}</section>')
+
+
+def page(title, mast, body, watch=""):
     return (f'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" '
-            f'content="width=device-width,initial-scale=1"><title>{esc(title)}</title>'
-            '<link rel="stylesheet" href="style.css"><body><nav><a href="progress.html">Proof progress</a>'
-            '<a href="proofs/index.html">Proof Atlas explorer</a></nav><main>' + body + '</main>' + watch + '</body></html>').encode()
+            f'content="width=device-width,initial-scale=1"><title>{esc(title)} | Proof Atlas</title>'
+            '<link rel="stylesheet" href="style.css"><body class="dashboard">'
+            + mast + '<main>' + body + '</main>' + watch + '</body></html>').encode()
 
 
 def proof_work_description(project, claims, *, closed_results=None):
@@ -260,7 +308,10 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         (output / "logs").mkdir(exist_ok=True)
         atomic(output / "logs/lean-verification.json", Path(ci_receipt).read_bytes())
     sources = edition_links(p)
-    heading = f'<p>Proof Atlas · Maintainer dashboard</p><h1>{esc(p["title"])}</h1><p>{sources}</p>'
+    folio = p.get("folio", {})
+    short_title = folio.get("short_title") or p["title"]
+    byline = " &middot; ".join(filter(None, (", ".join(map(esc, p.get("authors", []))), sources)))
+    heading = f'<header class="paper"><small>{esc(short_title)}</small><h1>Progress dashboard</h1><p>{byline}</p></header>'
     focus = p.get("focus")
     active = ""
     if focus and focus in work:
@@ -275,28 +326,42 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     payload = dict(title=p["title"], focus=focus, claims=entries, dependencies=edges, macros=materials.get("macros", {}))
     template = (assets / "explorer.html").read_text(encoding="utf-8-sig")
     packed = json.dumps(payload, ensure_ascii=False)
-    citation = paper_citation(p)
-    overview = esc(p.get("paper_overview", ""))
-    digest = hashlib.sha256((packed + dashboard + template + citation + overview).encode())
+    first = focus or folio.get("featured_claim") or (entries[0]["id"] if entries else "")
+    mast = masthead(p, first)
+    feature = featured_result(root, output, folio, entries)
+    contents = []
+    for entry in entries:
+        link = claim_url(entry["id"])
+        v = entry["verification"]
+        mark = (f'<a class="verified-badge" href="{esc(v["url"])}">✓ {esc(v["remote"])}</a>'
+                if v.get("evidence") else f'<a class="status" href="{link}?view=lean">{esc(v["label"])}</a>')
+        contents.append(f'<li><a class="toc-claim" href="{link}"><small>{esc(entry["reference"])}</small>'
+                        f'<strong>{esc(entry["title"])}</strong></a>{mark}</li>')
+    explorer = (template.replace("__MAST__", mast).replace("__TITLE__", esc(p["title"]))
+                .replace("__SHORT_TITLE__", esc(short_title)).replace("__BYLINE__", byline)
+                .replace("__FEATURE__", feature).replace("__COUNT__", str(len(entries)))
+                .replace("__CONTENTS__", "".join(contents)))
+    digest = hashlib.sha256((packed + dashboard + explorer).encode())
     for name in ("explorer.js", "explorer.css", "graph.js", "graph.css", "style.css", "live.js", "activity.js"):
         digest.update((assets / name).read_bytes())
         atomic(output / name, (assets / name).read_bytes())
     version = digest.hexdigest()
     payload["revision"] = version
     packed = json.dumps(payload, ensure_ascii=False).replace("<", r"\u003c")
-    explorer = template.replace("__TITLE__", esc(p["title"])).replace("__EDITION__", sources)
-    first = focus or (entries[0]["id"] if entries else "")
-    explorer = explorer.replace("__CLAIM__", quote(first, safe="")).replace("__CITATION__", citation).replace("__OVERVIEW__", overview)
-    for directory, base in ((output, "./"), (output / "proofs", "../")):
+    for directory, base, home in ((output, "./", True), (output / "proofs", "../", False)):
         directory.mkdir(exist_ok=True)
-        atomic(directory / "index.html", explorer.replace("__REVISION__", version).replace("__BASE__", base).replace("__DATA__", packed).encode())
+        shell = (explorer.replace("__ENTRY__", "home" if home else "reader")
+                 .replace("__HOME_HIDDEN__", "" if home else "hidden")
+                 .replace("__READER_HIDDEN__", "hidden" if home else "")
+                 .replace("__REVISION__", version).replace("__BASE__", base))
+        atomic(directory / "index.html", shell.replace("__DATA__", packed).encode())
     shutil.copytree(assets / "dagre", output / "dagre", dirs_exist_ok=True)
     shutil.copytree(assets / "katex", output / "katex", dirs_exist_ok=True)
     watch = f'<script src="live.js" data-revision="{version}" defer></script>'
     atomic(output / "preview-status.json", b'{}')
     if not (output / "activity.json").exists():
         atomic(output / "activity.json", b'{"runs":[]}')
-    atomic(output / "progress.html", page("Proof progress", dashboard, watch + '<script src="activity.js" defer></script>'))
+    atomic(output / "progress.html", page("Proof progress", mast, dashboard, watch + '<script src="activity.js" defer></script>'))
     atomic(output / "manuscript.pdf", pdf)
     shutil.copyfile(Path(__file__).resolve().parents[1] / "assets/style.css", output / "style.css")
     atomic(output / "inventory.json", json.dumps(claims, ensure_ascii=False, indent=2).encode())

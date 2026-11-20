@@ -2,7 +2,7 @@
 name: build-proof-atlas
 description: Build or resume a source-linked proof atlas from a theory paper, open a four-view Proof Atlas explorer and a live progress dashboard, and expose the distinction between paper claims, proof attempts and checked results.
 metadata:
-  version: "0.6.0"
+  version: "0.7.0"
 ---
 
 # Build a Proof Atlas
@@ -14,6 +14,10 @@ Record the edition's canonical HTTP(S) URL in `project.json` as `publication` an
 ## Start a project
 
 Introduce the paper on the homepage when building the first atlas. Record the full author list in manuscript order in `project.json` under `authors`. Verify the title, edition-specific citation and link, and supply the publication year or verified version date in `citation_details`. For arXiv, use the versioned identifier. Write a short `paper_overview` describing the paper’s question and distinguish any conjecture from established results. The shared homepage explains the Plain English, Paper, Lamport proof and Lean views, the direction and coverage of dependency arrows, and how to use the dashboard and verification evidence. Check the homepage and its navigation after publication. Cached imports can supply each author with a separate `--author` and the date with `--citation-details`.
+
+Use the bundled **Folio** renderer for new and resumed atlases. Its overview pairs a featured result with a manuscript figure above a compact contents list. Keep the full citation and reading guide in the masthead disclosure. The reader, graph and dashboard share the same typography and navigation. Preserve incoming claim/view links and each claim's actual verification state.
+
+In `project.json`, the optional `folio` object accepts `short_title`, `featured_claim` (a manuscript label), and an optional short `blurb`. Choose a representative result independently of the active proof target. When the manuscript has a useful figure, save a legible raster crop in the paper repository. Set `folio.figure` with its project-relative `path`, descriptive `alt`, `caption` including its manuscript figure number, and one-based PDF `page`. Inspect the crop against the bound edition. Without a figure the lead reflows as text, and without configuration the first inventoried claim is featured. When publishing a redesign, rebuild with the refreshed renderer and check the contents count, all four reading views, whole-paper graph, dashboard and evidence links at desktop and phone widths.
 
 For arXiv, run `python <skill>/scripts/import_arxiv.py <arxiv-url> <new-project>`. It resolves the edition, downloads and hashes the source and PDF, follows literal TeX inputs, inventories labeled claims, and builds both views. A cached edition can be imported using its versioned ID, `--title`, `--archive` and `--pdf`. If multiple main files exist, select one with `--main`. On resume, open the existing project instead of importing again.
 
