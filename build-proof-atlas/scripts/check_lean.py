@@ -1,6 +1,8 @@
 """Provision the project's Lean toolchain and run its Lake build. Python 3.9+."""
 import argparse
+from contextlib import nullcontext
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 import re
@@ -10,6 +12,7 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
+from activity import Activity
 
 
 def run(args, package, env, log, *, required=True):
@@ -92,7 +95,7 @@ def select_lake(package, pin, env, log, offline=False):
     return [str(private / "bin" / ("elan" + suffix)), *elan_run]
 
 
-def check(package, log, mathlib_modules=(), offline=False):
+def check(package, log, mathlib_modules=(), offline=False, targets=()):
     pin = (package / "lean-toolchain").read_text(encoding="utf-8-sig").strip()
     if not pin or any(char.isspace() for char in pin) or pin.startswith("-"):
         raise ValueError("Invalid lean-toolchain file")
@@ -117,7 +120,7 @@ def check(package, log, mathlib_modules=(), offline=False):
         except RuntimeError as exc:
             print(f"Precompiled cache unavailable ({exc}); continuing with Lake build.", file=log, flush=True)
     build_args = ["--no-cache", "build"] if offline else ["build"]
-    run([*lake, *build_args], package, env, log)
+    run([*lake, *build_args, *targets], package, env, log)
 
 
 def main():
@@ -128,7 +131,15 @@ def main():
                         help="Fetch precompiled dependencies for this Mathlib import; repeat per module")
     parser.add_argument("--offline", action="store_true",
                         help="Reuse the installed toolchain and local dependencies; disable remote Git and cache downloads")
+    parser.add_argument("--project", type=Path, help="Atlas project containing the claim inventory")
+    parser.add_argument("--claim", help="Inventory label being checked (defaults to the project focus)")
+    parser.add_argument("--task", default="Check the selected Lean declarations")
+    parser.add_argument("--activity-id", help="Continue an existing proof-writing activity")
+    parser.add_argument("--target", action="append", default=[], help="Check a specific Lake module or library during proof development")
+    parser.add_argument("--publish-activity", action="store_true", help="Also report activity to the configured GitHub repository")
     args = parser.parse_args()
+    if any(not re.fullmatch(r"[A-Za-z_][\w'.]*", name) for name in args.target):
+        parser.error("--target expects a Lean module or library name")
     package = args.package.resolve(strict=True)
     logs = args.logs or package / ".proof-atlas-tools" / "logs"
     logs.mkdir(parents=True, exist_ok=True)
@@ -137,7 +148,13 @@ def main():
                                      prefix=f"lean-{stamp}-", suffix=".log") as log:
         print(f"Lean run log: {log.name}", flush=True)
         try:
-            check(package, log, args.mathlib_module, args.offline)
+            root = args.project or package.parent
+            activity = nullcontext()
+            bound = (root / "dist/inventory.json").is_file() and (root / "project.json").is_file()
+            if args.claim or args.project or args.publish_activity or (bound and json.loads((root / "project.json").read_bytes()).get("focus")):
+                activity = Activity(root, args.claim, args.task, args.activity_id, args.publish_activity)
+            with activity:
+                check(package, log, args.mathlib_module, args.offline, args.target)
         except (OSError, ValueError, RuntimeError, KeyError, zipfile.BadZipFile) as exc:
             print(f"Build incomplete: {exc}", file=log)
             print(f"Build incomplete: {exc}", file=sys.stderr)

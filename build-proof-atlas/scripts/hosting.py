@@ -1,5 +1,6 @@
 """Read or record a paper's hosting choice, or publish its reviewed commit."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -23,6 +24,38 @@ def exists(endpoint, root):
     raise ValueError(result.stderr.strip())
 
 
+def verify_proof_inputs(root, commit, project):
+    """Check the blobs that will be deployed, even while authors edit the worktree."""
+    actual = {}
+    with subprocess.Popen(["git", "cat-file", "--batch"], cwd=root,
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE) as reader:
+        for claim, work in project.get("work", {}).items():
+            changed = []
+            for path, expected in work.get("checked_inputs", {}).items():
+                if any(c in path for c in "\r\n\0"):
+                    raise ValueError(f"Invalid proof input path for {claim}")
+                if path not in actual:
+                    reader.stdin.write(f"{commit}:{path}\n".encode("utf-8"))
+                    reader.stdin.flush()
+                    header = reader.stdout.readline().rstrip(b"\n")
+                    if header.endswith(b" missing"):
+                        actual[path] = None
+                    else:
+                        _, kind, size = header.split()
+                        data = reader.stdout.read(int(size))
+                        if reader.stdout.read(1) != b"\n" or len(data) != int(size):
+                            raise ValueError("Incomplete Git object while checking proof inputs")
+                        actual[path] = hashlib.sha256(data).hexdigest() if kind == b"blob" else None
+                if expected != actual[path]:
+                    changed.append(path)
+            if changed:
+                detail = f"{claim} has missing or changed committed proof inputs: " + ", ".join(changed)
+                if work.get("status") == "closed":
+                    raise ValueError(detail)
+                print(detail, file=sys.stderr)
+        reader.stdin.close()
+
+
 def publish(root, choice):
     url = choice.get("repository", "")
     match = re.fullmatch(r"https://github\.com/([\w.-]+/[\w.-]+)", url)
@@ -33,11 +66,15 @@ def publish(root, choice):
         return command(["git", *args], root).stdout.strip()
     if Path(git("rev-parse", "--show-toplevel")).resolve() != root:
         raise ValueError("Publish from the paper repository root")
-    if git("status", "--porcelain") or git("branch", "--show-current") != "main":
+    if git("branch", "--show-current") != "main":
         raise ValueError("Commit the reviewed project on main before publishing")
-    git("ls-files", "--error-unmatch", "project.json")
+    commit = git("rev-parse", "HEAD")
+    committed = json.loads(subprocess.check_output(["git", "show", commit + ":project.json"], cwd=root))
+    if committed.get("hosting") != choice:
+        raise ValueError("Commit the selected hosting destination before publishing")
     if choice.get("site"):
-        git("ls-files", "--error-unmatch", ".github/workflows/pages.yml")
+        git("cat-file", "-e", commit + ":.github/workflows/pages.yml")
+    verify_proof_inputs(root, commit, committed)
     remotes = git("remote").splitlines()
     if "origin" in remotes:
         for name in git("remote", "get-url", "--push", "--all", "origin").splitlines():
@@ -53,7 +90,9 @@ def publish(root, choice):
         command(["gh", "repo", "create", repo, "--"+choice["visibility"]], root)
     if "origin" not in remotes:
         git("remote", "add", "origin", url+".git")
-    git("push", "-u", "origin", "main")
+    git("push", "origin", commit + ":refs/heads/main")
+    git("config", "branch.main.remote", "origin")
+    git("config", "branch.main.merge", "refs/heads/main")
     if choice.get("site"):
         if not exists(endpoint+"/pages", root):
             command(["gh", "api", "-X", "POST", endpoint+"/pages", "-f", "build_type=workflow"], root)
@@ -114,6 +153,6 @@ if __name__ == "__main__":
     try:
         main()
     except subprocess.CalledProcessError as exc:
-        sys.exit(exc.stderr.strip() or str(exc))
+        sys.exit((exc.stderr or "").strip() or str(exc))
     except (OSError, ValueError) as exc:
         sys.exit(str(exc))

@@ -13,3 +13,6 @@ details {border-top:1px solid #e0e6df;padding:.7rem 0}
 summary {cursor:pointer;color:#134f47;font-weight:600}
 pre {white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f0;padding:1rem;font-size:.88rem}
 li {margin:.4rem 0}
+.proof-target {font-size:.8rem;color:#075749;background:#e3f2eb;padding:.15rem .45rem;border-radius:.25rem}
+.claim-activity {display:block;white-space:pre-line;color:#465d55;font-size:.9rem}
+.working .claim-activity {color:#075749;font-weight:650}

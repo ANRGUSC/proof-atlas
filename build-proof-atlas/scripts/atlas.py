@@ -81,6 +81,29 @@ def page(title, body, watch=""):
             '<a href="proofs/index.html">Proof Atlas explorer</a></nav><main>' + body + '</main>' + watch + '</body></html>').encode()
 
 
+def proof_work_description(project, claims, *, closed_results=None):
+    scope = project.get("proof_work")
+    if scope is None:
+        return "Proof-work authorization has not been recorded."
+    mode = scope["mode"]
+    if mode == "paper":
+        total = sum(claim["kind"] != "conjecture" for claim in claims)
+        if total and closed_results == total:
+            text = "Paper-wide proof work complete. All stated results are closed."
+        else:
+            text = f"Paper-wide. Continue through all {total} stated results, including their prerequisites. Track conjectures separately."
+    elif mode == "claim":
+        selected = next((c for c in claims if c["id"] == scope.get("claim")), None)
+        if selected is None:
+            raise ValueError("proof_work.claim must identify a manuscript claim")
+        text = f"One claim. Work through {selected['title']} ({selected['id']}) and its prerequisites, then stop for the author."
+    else:
+        raise ValueError("proof_work.mode must be paper or claim")
+    if scope.get("paused"):
+        return "Paused by the author. Saved scope: " + text
+    return text
+
+
 def build(root):
     p = json.loads((root / "project.json").read_text(encoding="utf-8-sig"))
     if p["schema_version"] != 1 or not p["environments"]:
@@ -112,14 +135,33 @@ def build(root):
     assets = Path(__file__).resolve().parents[1] / "assets"
     rows, entries, log_links = [], [], {}
     stale = {}
+    subproof_lists = {}
+    closed_results = 0
     for c in claims:
         cid = c["id"]
         w = work.get(cid, {})
         m = notes.get(cid, {})
         status = w.get("status", "open")
-        if status not in {"open", "drafted", "blocked", "attempted"}:
+        if status not in {"open", "drafted", "blocked", "attempted", "closed"}:
             raise ValueError(f"{cid}: unsupported checkpoint status {status}")
         entry = {**c, **m, **w}
+        if status == "closed":
+            closure = w["closure"]
+            receipt = local(root, closure["audit"]).read_bytes()
+            audit = json.loads(receipt)
+            package = local(root, closure["package"])
+            relative = package.relative_to(root)
+            inputs = {(relative / name).as_posix(): digest for name, digest in audit["checked_inputs"].items()}
+            if (not inputs or inputs != w.get("checked_inputs") or not w.get("run_log") or
+                not w.get("scope") or not closure.get("correspondence") or
+                audit["expected"] != closure["expected"] or audit["declaration"] != closure["declaration"] or
+                set(audit["axioms"]) - {"propext", "Classical.choice", "Quot.sound"} or
+                any(part["status"] != "checked" for part in w.get("subproofs", []))):
+                raise ValueError(f"{cid}: closure requires matching audit evidence, correspondence and resolved obligations")
+            (output / "logs").mkdir(exist_ok=True)
+            name = hashlib.sha256(receipt).hexdigest() + ".json"
+            atomic(output / "logs" / name, receipt)
+            entry["audit_log"] = "logs/" + name
         changed = [path for path, digest in w.get("checked_inputs", {}).items()
                    if not local(root, path).is_file() or hashlib.sha256(local(root, path).read_bytes()).hexdigest() != digest]
         if changed:
@@ -127,7 +169,25 @@ def build(root):
             entry["scope"] = stale[cid] + ". The linked log is historical."
             entry["summary"] = m.get("summary", "The paper claim is awaiting a fresh Lean check.")
             status = "awaiting recheck"
+        entry["status"] = status
+        if c["kind"] != "conjecture" and status == "closed":
+            closed_results += 1
         entry.setdefault("reference", c["kind"].title())
+        subproofs = []
+        for part in w.get("subproofs", []):
+            state = part["status"]
+            if state not in {"open", "attempted", "checked"}:
+                raise ValueError(f"{cid}: unsupported subproof status {state}")
+            if state == "checked":
+                if not (part.get("declaration") and w.get("run_log") and w.get("checked_inputs")):
+                    raise ValueError(f"{cid}: checked subproof requires a declaration and recorded build inputs and log")
+                if changed:
+                    state = "awaiting recheck"
+            subproofs.append(dict(part, status=state))
+        entry["subproofs"] = subproofs
+        if subproofs:
+            items = "".join(f'<li>{esc(part["title"])} · {esc(part["status"])}</li>' for part in subproofs)
+            subproof_lists[cid] = f"<h3>Subproofs</h3><ol>{items}</ol>"
         entry["sources"] = [
             {"path": filename, "text": local(root, filename).read_text(encoding="utf-8-sig")}
             for filename in dict.fromkeys(([w["lean"]] if w.get("lean") else []) + w.get("lean_sources", []))
@@ -140,25 +200,29 @@ def build(root):
             (output / "logs").mkdir(exist_ok=True)
             atomic(output / "logs" / name, log)
             entry["log"] = "logs/" + name
-            log_links[cid] = f'<p><a href="logs/{name}">Lean run log</a></p>'
+            log_links[cid] = f'<p><a href="logs/{name}">Read the recorded Lean run</a></p>'
         entries.append(entry)
         url = "proofs/index.html#/claim/" + quote(cid, safe="")
-        rows.append(f'<li><a href="{url}">{esc(entry["reference"])} · {esc(c["title"])}</a> · {esc(status)}</li>')
+        target = ' <strong class="proof-target">Current proof target</strong>' if cid == p.get("focus") else ''
+        rows.append(f'<li data-claim="{esc(cid)}"><a href="{url}">{esc(entry["reference"])} · {esc(c["title"])}</a> · {esc(status)}{target}<span class="claim-activity"></span></li>')
     sources = edition_links(p)
     heading = f'<p>Proof Atlas · Maintainer dashboard</p><h1>{esc(p["title"])}</h1><p>{sources}</p>'
     focus = p.get("focus")
     active = ""
     if focus and focus in work:
         w = work[focus]
-        active = (f'<section><small>Current target</small><h2><a href="proofs/index.html#/claim/{quote(focus, safe="")}">{esc(by_id[focus]["title"])}</a></h2>'
+        active = (f'<section><small>Latest saved proof checkpoint</small><h2><a href="proofs/index.html#/claim/{quote(focus, safe="")}">{esc(by_id[focus]["title"])}</a></h2>'
                   f'<p>{esc(stale.get(focus, w["step"]))}</p><p><strong>Next step</strong><br>{esc(w["next"])}</p>'
-                  f'<time>Last checkpoint · {esc(w["updated"])}</time>{log_links.get(focus, "")}</section>')
-    dashboard = heading + active + f'<section><h2>Claim inventory</h2><p>{len(claims)} entries in manuscript order</p><ol>' + "".join(rows) + '</ol></section>'
+                  f'{subproof_lists.get(focus, "")}<time>Last checkpoint · {esc(w["updated"])}</time>{log_links.get(focus, "")}</section>')
+    feed = p.get("hosting", {}).get("activity_url", "")
+    total_results = sum(c["kind"] != "conjecture" for c in claims)
+    scope = proof_work_description(p, claims, closed_results=closed_results)
+    dashboard = heading + f'<section id="claim-inventory" data-feed="{esc(feed)}"><h2>Claim inventory</h2><p><strong>Authorized proof work</strong><br>{esc(scope)}</p><p>{closed_results} of {total_results} stated results closed</p><ol>' + "".join(rows) + '</ol></section>' + active
     payload = dict(title=p["title"], focus=focus, claims=entries, dependencies=edges, macros=materials.get("macros", {}))
     template = (assets / "explorer.html").read_text(encoding="utf-8-sig")
     packed = json.dumps(payload, ensure_ascii=False)
     digest = hashlib.sha256((packed + dashboard + template).encode())
-    for name in ("explorer.js", "explorer.css", "graph.js", "graph.css", "style.css", "live.js"):
+    for name in ("explorer.js", "explorer.css", "graph.js", "graph.css", "style.css", "live.js", "activity.js"):
         digest.update((assets / name).read_bytes())
         atomic(output / name, (assets / name).read_bytes())
     version = digest.hexdigest()
@@ -172,12 +236,15 @@ def build(root):
     shutil.copytree(assets / "katex", output / "katex", dirs_exist_ok=True)
     watch = f'<script src="live.js" data-revision="{version}" defer></script>'
     atomic(output / "preview-status.json", b'{}')
-    atomic(output / "progress.html", page("Proof progress", dashboard, watch))
+    if not (output / "activity.json").exists():
+        atomic(output / "activity.json", b'{"runs":[]}')
+    atomic(output / "progress.html", page("Proof progress", dashboard, watch + '<script src="activity.js" defer></script>'))
     atomic(output / "manuscript.pdf", pdf)
     shutil.copyfile(Path(__file__).resolve().parents[1] / "assets/style.css", output / "style.css")
     atomic(output / "inventory.json", json.dumps(claims, ensure_ascii=False, indent=2).encode())
     atomic(output / "checkpoint.json", json.dumps(dict(revision=version)).encode())
     print(f"{len(claims)} claims | {output / 'progress.html'}")
+    print(f"Authorized proof work: {scope}")
     hosting = p.get("hosting") or {}
     if not hosting.get("repository") and hosting.get("decision") != "local":
         print("Hosting decision pending. Ask where the author wants this paper's explorer and dashboard hosted.")

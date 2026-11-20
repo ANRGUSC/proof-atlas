@@ -16,7 +16,7 @@ def inputs(root):
     p = json.loads((root / "project.json").read_text(encoding="utf-8-sig"))
     paths.update(local(root, src["path"]) for src in [p["pdf"], *p["tex"]])
     for w in p.get("work", {}).values():
-        for name in [w.get("lean"), w.get("run_log"), *w.get("lean_sources", []), *w.get("checked_inputs", {})]:
+        for name in [w.get("lean"), w.get("run_log"), w.get("closure", {}).get("audit"), *w.get("lean_sources", []), *w.get("checked_inputs", {})]:
             if name:
                 paths.add(local(root, name))
     if p.get("reader"):
