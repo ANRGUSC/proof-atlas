@@ -1,7 +1,7 @@
 "use strict";
 // Dagre handles branching, disconnected components and cyclic input. Positions are
 // computed from the recorded relationships; paper-specific geometry is unnecessary.
-const graphState = {chainOnly:false, camera:null, layoutKey:"", resize:null};
+const graphState = {chainOnly:false, camera:null, autoFit:true, layoutKey:"", resize:null};
 
 function graphSVG(tag, attrs={}) {
   const n=document.createElementNS("http://www.w3.org/2000/svg",tag);
@@ -48,14 +48,12 @@ function graphView(selected) {
   }
   const up=reachable(selected.id,parents), down=reachable(selected.id,children);
   const trace=new Set([selected.id,...up,...down]);
-  const isolated=[...claims.values()].filter(c=>!parents.get(c.id).length && !children.get(c.id).length);
-  const unlinked=new Set(isolated.map(c=>c.id));
-  const shown=[...claims.values()].filter(c=>graphState.chainOnly?trace.has(c.id):!unlinked.has(c.id)||c.id===selected.id);
+  const shown=[...claims.values()].filter(c=>!graphState.chainOnly || trace.has(c.id));
   const ids=new Set(shown.map(c=>c.id));
   const edges=data.dependencies.filter(e=>ids.has(e.claim)&&ids.has(e.prerequisite));
 
   const head=el("div",null,"graph-head"), title=el("div");
-  title.append(el("h2","Dependency graph"),el("p",claims.size+" claims  ·  "+data.dependencies.length+" recorded dependencies"));
+  title.append(el("h2","Dependency graph"),el("p","Showing "+shown.length+" of "+claims.size+" paper claims  ·  "+edges.length+" recorded "+(edges.length===1?"dependency":"dependencies")));
   const picker=el("select");picker.setAttribute("aria-label","Select a claim in the graph");
   for(const c of claims.values()){const option=el("option",c.reference+" · "+c.title);option.value=c.id;picker.append(option);}
   picker.value=selected.id;picker.onchange=()=>{location.href=route(picker.value,"english",true);};
@@ -66,7 +64,7 @@ function graphView(selected) {
   main.append(board);board.append(tools);
   const modes=el("div",null,"graph-modes");
   for(const [only,label] of [[false,"Whole paper"],[true,"Selected chain"]]){
-    const b=graphButton(label,()=>{graphState.chainOnly=only;render();document.querySelector('.graph-modes [aria-pressed="true"]').focus();});
+    const b=graphButton(label,()=>{graphState.chainOnly=only;graphState.camera=null;render();document.querySelector('.graph-modes [aria-pressed="true"]').focus();});
     b.setAttribute("aria-pressed",String(graphState.chainOnly===only));modes.append(b);
   }
   tools.append(modes);
@@ -81,9 +79,26 @@ function graphView(selected) {
   }
   svg.append(defs);
   const graph=new dagre.graphlib.Graph({multigraph:true}).setGraph({rankdir:"TB",nodesep:22,ranksep:68,marginx:24,marginy:25}).setDefaultEdgeLabel(()=>({}));
-  for(const c of shown) graph.setNode(c.id,{width:174,height:72});
+  const linked=shown.filter(c=>parents.get(c.id).length || children.get(c.id).length);
+  const isolated=shown.filter(c=>!parents.get(c.id).length && !children.get(c.id).length);
+  for(const c of linked) graph.setNode(c.id,{width:174,height:72});
   edges.forEach((e,i)=>graph.setEdge(e.prerequisite,e.claim,{},String(i)));
-  dagre.layout(graph);
+  const bounds={width:0,height:0};
+  if(linked.length){
+    dagre.layout(graph);
+    bounds.width=graph.graph().width;bounds.height=graph.graph().height;
+  }
+  // Pack isolated claims below the linked components. Dagre places every isolate
+  // in one rank, making the whole-paper overview unnecessarily wide.
+  if(isolated.length){
+    const width=174,height=72,gap=22,margin=24;
+    const columns=Math.min(isolated.length,Math.max(1,Math.floor((bounds.width-2*margin+gap)/(width+gap)),Math.ceil(Math.sqrt(isolated.length))));
+    const top=bounds.height+margin;
+    isolated.forEach((c,i)=>graph.setNode(c.id,{width,height,
+      x:margin+width/2+(i%columns)*(width+gap),y:top+height/2+Math.floor(i/columns)*(height+gap)}));
+    bounds.width=Math.max(bounds.width,2*margin+columns*(width+gap)-gap);
+    bounds.height=top+Math.ceil(isolated.length/columns)*(height+gap)-gap+margin;
+  }
   edges.forEach((e,i)=>{
     const kind=(up.has(e.prerequisite)||e.prerequisite===selected.id) && (up.has(e.claim)||e.claim===selected.id)?"ancestor":
       (down.has(e.prerequisite)||e.prerequisite===selected.id) && (down.has(e.claim)||e.claim===selected.id)?"descendant":"other";
@@ -104,11 +119,12 @@ function graphView(selected) {
     });
     svg.append(a);
   }
-  const bounds=graph.graph(), key=JSON.stringify([shown.map(c=>[c.id,c.title]),edges.map(e=>[e.claim,e.prerequisite])]);
+  const key=JSON.stringify([shown.map(c=>[c.id,c.title]),edges.map(e=>[e.claim,e.prerequisite])]);
   if(graphState.layoutKey!==key){graphState.camera=null;graphState.layoutKey=key;}
   const zoom=el("div",null,"graph-zoom"), readout=el("output");
   readout.setAttribute("aria-label","Zoom level");tools.append(zoom);
   function fit(){
+    graphState.autoFit=true;
     graphState.camera={x:bounds.width/2,y:bounds.height/2,k:Math.min(viewport.clientWidth/bounds.width,viewport.clientHeight/bounds.height,1.35)};
     paint();
   }
@@ -117,6 +133,7 @@ function graphView(selected) {
     svg.setAttribute("viewBox",[x-w/2,y-h/2,w,h].join(" "));readout.textContent=Math.round(k*100)+"%";
   }
   function zoomBy(scale,pivot){
+    graphState.autoFit=false;
     const c=graphState.camera, old=c.k;
     c.k=Math.min(4,Math.max(0.035,old*scale));
     if(pivot){c.x+=pivot.x*(1/old-1/c.k);c.y+=pivot.y*(1/old-1/c.k);}
@@ -131,7 +148,7 @@ function graphView(selected) {
     if(!drag||e.pointerId!==drag.id)return;
     const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
     if(!moved && Math.hypot(dx,dy)<4)return;
-    if(!moved){svg.setPointerCapture(e.pointerId);moved=true;}
+    if(!moved){svg.setPointerCapture(e.pointerId);moved=true;graphState.autoFit=false;}
     graphState.camera.x-=dx/graphState.camera.k;graphState.camera.y-=dy/graphState.camera.k;
     drag.x=e.clientX;drag.y=e.clientY;paint();
   };
@@ -144,6 +161,7 @@ function graphView(selected) {
     else if(e.key==="-") zoomBy(.8);
     else if(e.key==="Home") fit();
     else if(e.key.startsWith("Arrow")){
+      graphState.autoFit=false;
       const step=48/graphState.camera.k;
       if(e.key==="ArrowRight")graphState.camera.x+=step;
       if(e.key==="ArrowLeft")graphState.camera.x-=step;
@@ -154,18 +172,16 @@ function graphView(selected) {
     e.preventDefault();
   };
   if(graphState.camera)paint();else fit();
-  graphState.resize=new ResizeObserver(()=>{if(viewport.isConnected && graphState.camera)paint();});graphState.resize.observe(viewport);
+  graphState.resize=new ResizeObserver(()=>{
+    if(viewport.isConnected && graphState.camera){if(graphState.autoFit)fit();else paint();}
+  });graphState.resize.observe(viewport);
   const legend=el("div",null,"graph-legend");
   for(const [label,key] of [["Selected","selected"],["Prerequisite","ancestor"],["Uses selected claim","descendant"]]){
     const item=el("span",label);item.prepend(el("i",null,key));legend.append(item);
   }
   board.append(legend);
-  main.append(el("p","Arrows run from a prerequisite to the result that uses it.","graph-caption"));
-  if(isolated.length){
-    const drawer=el("details",null,"graph-unlinked");drawer.append(el("summary","Claims without recorded links ("+isolated.length+")"));
-    for(const c of isolated)drawer.append(link(c.reference+" · "+c.title,route(c.id,"english",true)));
-    main.append(drawer);
-  }
+  main.append(el("p","Arrows run from a prerequisite to the result that uses it."+
+    (isolated.length?" Claims without arrows have no recorded dependencies or dependents.":""),"graph-caption"));
 
   inspector.append(el("small",selected.reference),el("h3",selected.title),rich(selected.summary||"No English summary recorded."),link("All proofs →",route(selected.id),"graph-read"));
   for(const [reverse,label] of [[false,"Depends on"],[true,"Used by"]]){

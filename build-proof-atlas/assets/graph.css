@@ -33,7 +33,6 @@
 .graph-legend span {display:inline-flex;align-items:center;gap:.4rem}
 .graph-legend i {width:10px;height:10px;border-radius:3px;background:#174e40}.graph-legend .ancestor {background:#cff0de;border:1px solid #4e9482}.graph-legend .descendant {background:#ffe8c1;border:1px solid #bb884c}
 .graph-caption {font-size:.82rem;color:#52665a;margin:.6rem 0 1rem}
-.graph-unlinked {font-size:.9rem}.graph-unlinked a {display:block;margin:.5rem 1rem}
 #content .graph-inspector {margin:0;border:1px solid #c3d1c5;border-top:4px solid #22664f;background:#fff;padding:1.2rem;border-radius:8px}
 #content .graph-inspector h3 {font:500 1.75rem/1.13 Georgia,serif;margin:.4rem 0}
 .graph-inspector>p {font-size:.92rem;line-height:1.5}
