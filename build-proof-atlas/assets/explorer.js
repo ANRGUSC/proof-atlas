@@ -106,6 +106,7 @@ function proofView(c,view) {
 }
 function render(){
   const state=locationState();
+  document.querySelector("#about-atlas").hidden=location.hash.startsWith("#/");
   if(graphState.resize){graphState.resize.disconnect();graphState.resize=null;}
   const hadNodeFocus=document.activeElement?.closest(".graph-node");
   document.body.classList.toggle("graph-mode",state.graph);

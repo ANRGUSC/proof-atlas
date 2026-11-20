@@ -16,7 +16,7 @@ def esc(value):
     return html.escape(str(value), quote=True)
 
 
-def edition_links(project):
+def edition_reference(project):
     # Older projects included the PDF caption in their edition text.
     edition = project["edition"].removesuffix(" \u00b7 local manuscript and PDF")
     label = esc(edition)
@@ -26,8 +26,18 @@ def edition_links(project):
         if url.scheme not in ("http", "https") or not url.hostname:
             raise ValueError("project.json: publication must be an absolute HTTP(S) URL")
         label = f'<a href="{esc(publication)}">{label or "Publication"}</a>'
-    pdf = '<a href="manuscript.pdf">Manuscript PDF</a>'
-    return " &middot; ".join(filter(None, (label, pdf)))
+    return label
+
+
+def edition_links(project):
+    return " &middot; ".join(filter(None, (edition_reference(project), '<a href="manuscript.pdf">Manuscript PDF</a>')))
+
+
+def paper_citation(project):
+    authors = ", ".join(esc(author) for author in project.get("authors", []))
+    title = "<cite>" + esc(project["title"]) + "</cite>"
+    edition = " ".join(filter(None, (edition_reference(project), esc(project.get("citation_details", "")))))
+    return ". ".join(filter(None, (authors, title, edition))) + "."
 
 
 def atomic(path, data):
@@ -265,7 +275,9 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     payload = dict(title=p["title"], focus=focus, claims=entries, dependencies=edges, macros=materials.get("macros", {}))
     template = (assets / "explorer.html").read_text(encoding="utf-8-sig")
     packed = json.dumps(payload, ensure_ascii=False)
-    digest = hashlib.sha256((packed + dashboard + template).encode())
+    citation = paper_citation(p)
+    overview = esc(p.get("paper_overview", ""))
+    digest = hashlib.sha256((packed + dashboard + template + citation + overview).encode())
     for name in ("explorer.js", "explorer.css", "graph.js", "graph.css", "style.css", "live.js", "activity.js"):
         digest.update((assets / name).read_bytes())
         atomic(output / name, (assets / name).read_bytes())
@@ -273,6 +285,8 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     payload["revision"] = version
     packed = json.dumps(payload, ensure_ascii=False).replace("<", r"\u003c")
     explorer = template.replace("__TITLE__", esc(p["title"])).replace("__EDITION__", sources)
+    first = focus or (entries[0]["id"] if entries else "")
+    explorer = explorer.replace("__CLAIM__", quote(first, safe="")).replace("__CITATION__", citation).replace("__OVERVIEW__", overview)
     for directory, base in ((output, "./"), (output / "proofs", "../")):
         directory.mkdir(exist_ok=True)
         atomic(directory / "index.html", explorer.replace("__REVISION__", version).replace("__BASE__", base).replace("__DATA__", packed).encode())

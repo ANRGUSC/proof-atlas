@@ -37,10 +37,22 @@ def fetch(url):
 
 
 class Citation(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.authors = []
+        self.year = ""
+
     def handle_starttag(self, tag, attrs):
         fields = dict(attrs)
-        if tag == "meta" and fields.get("name") == "citation_title":
-            self.title = fields["content"]
+        if tag != "meta" or not fields.get("content"):
+            return
+        value = " ".join(fields["content"].split())
+        if fields.get("name") == "citation_title":
+            self.title = value
+        elif fields.get("name") == "citation_author":
+            self.authors.append(value)
+        elif fields.get("name") == "citation_date" and re.match(r"^\d{4}\b", value):
+            self.year = value[:4]
 
 
 def source_files(data):
@@ -151,9 +163,9 @@ def prepare(args, root):
         raise ValueError("Use --archive and --pdf together for a cached submission")
     if args.archive and (not version or not args.title):
         raise ValueError("A cached import needs the exact edition and its --title")
+    parser = Citation()
     if not args.archive:
         record = fetch("https://arxiv.org/abs/" + paper + (version or "")).decode("utf-8")
-        parser = Citation()
         parser.feed(record)
         title = args.title or getattr(parser, "title", None)
         if not version:
@@ -209,6 +221,7 @@ def prepare(args, root):
          unmatched_pages=[c["id"] for c in claims if c["id"] not in notes],
          source_order_to_review=order, unvisited_tex=sorted(set(files)-set(order))))
     save(root/"project.json", dict(schema_version=1, title=" ".join(title.split()),
+         authors=args.author or parser.authors, citation_details=args.citation_details or parser.year,
          edition="arXiv:"+edition, revision=edition, publication="https://arxiv.org/abs/"+edition,
          tex=sources, pdf=pdf_info, source_archive=archive_info, environments=sorted(names),
          claim_order=[c["id"] for c in claims], hosting={"decision":"pending"}, reader="reader.json", work={}))
@@ -222,6 +235,8 @@ def main():
     parser.add_argument("project", type=Path)
     parser.add_argument("--main", help="Main TeX path inside the source archive")
     parser.add_argument("--title")
+    parser.add_argument("--author", action="append", help="Author in citation order; repeat for each author")
+    parser.add_argument("--citation-details", help="Publication details following the edition, such as its date")
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--pdf", type=Path)
     args = parser.parse_args()

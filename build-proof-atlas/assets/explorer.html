@@ -1,5 +1,20 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="__BASE__"><title>Proof Atlas · __TITLE__</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="explorer.css"><link rel="stylesheet" href="graph.css"><link rel="stylesheet" href="katex/katex.min.css"></head>
-<body class="atlas"><header><div class="mast"><strong>Proof Atlas</strong><nav aria-label="Project"><a href="proofs/">Explorer</a><a id="graph-nav" href="proofs/#/graph/">Dependency graph</a><a href="progress.html">Progress dashboard</a><a href="manuscript.pdf">Paper PDF</a></nav></div><div class="paper"><h1>__TITLE__</h1><p>__EDITION__</p></div></header>
+<body class="atlas"><header><div class="mast"><strong><a href="index.html">Proof Atlas</a></strong><nav aria-label="Project"><a href="index.html">About this atlas</a><a href="proofs/index.html#/claim/__CLAIM__">Explorer</a><a id="graph-nav" href="proofs/index.html#/graph/">Dependency graph</a><a href="progress.html">Progress dashboard</a><a href="manuscript.pdf">Paper PDF</a></nav></div><div class="paper"><h1>__TITLE__</h1><p>__EDITION__</p></div></header>
+<section class="atlas-intro" id="about-atlas" aria-labelledby="about-title">
+  <h2 id="about-title">About this atlas</h2>
+  <p>This site follows the paper claim by claim, connecting each result to its manuscript passage, proof steps, and available Lean verification. __OVERVIEW__</p>
+  <p class="paper-citation"><strong>Paper citation</strong> __CITATION__</p>
+  <div class="reader-guide">
+    <div><h3>Read a proof</h3><dl>
+      <dt><a href="proofs/index.html#/claim/__CLAIM__?view=english">Plain English</a></dt><dd>What the claim says and the main idea of its proof.</dd>
+      <dt><a href="proofs/index.html#/claim/__CLAIM__?view=paper">Paper</a></dt><dd>The original statement and its surrounding argument in the manuscript.</dd>
+      <dt><a href="proofs/index.html#/claim/__CLAIM__?view=lamport">Lamport proof</a></dt><dd>A structured argument with larger steps broken into smaller deductions.</dd>
+      <dt><a href="proofs/index.html#/claim/__CLAIM__?view=lean">Lean</a></dt><dd>The formal statement, proof code, and evidence of which checks have passed.</dd>
+    </dl></div>
+    <div><h3><a href="proofs/index.html#/graph/__CLAIM__">Dependency graph</a></h3><p>Follow an arrow from a prerequisite to a result that uses it. Whole paper shows every claim, including those without recorded links. Selected chain follows the chosen claim’s prerequisites and dependents.</p>
+    <h3><a href="progress.html">Progress dashboard</a></h3><p>See which claims are open, in progress, or checked. When a GitHub machine-verification badge appears, follow it to the run or open the accompanying verification record.</p></div>
+  </div>
+</section>
 <main class="workspace"><aside><label for="search">Find a claim</label><input id="search" type="search" placeholder="Search by title or number"><div id="claim-list"></div></aside><div id="content" aria-live="polite"></div></main>
 <script id="atlas-data" type="application/json">__DATA__</script><script src="katex/katex.min.js"></script><script src="dagre/dagre.min.js"></script><script src="graph.js"></script><script src="explorer.js"></script><script src="live.js" data-revision="__REVISION__" defer></script></body></html>
