@@ -121,6 +121,7 @@ function render(){
   document.body.classList.toggle("graph-mode",state.graph);
   document.querySelector("#graph-nav").href=route(state.id || data.focus || "", "english",true);
   if(home){document.title=data.title+" | Proof Atlas";return;}
+  if(claims.has(state.id)) document.querySelector('[data-nav="reader"]').href=route(state.id,state.view);
   fillList(state.id);pane.replaceChildren();
   const c=claims.get(state.id);
   if(!c){pane.append(el("h2",claims.size?"Claim not found":"No claims imported yet"));return;}

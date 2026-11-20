@@ -15,6 +15,8 @@ def inputs(root):
     paths = {root / "project.json"}
     p = json.loads((root / "project.json").read_text(encoding="utf-8-sig"))
     paths.update(local(root, src["path"]) for src in [p["pdf"], *p["tex"]])
+    if figure := p.get("folio", {}).get("figure"):
+        paths.add(local(root, figure["path"]))
     for w in p.get("work", {}).values():
         for name in [w.get("lean"), w.get("run_log"), w.get("closure", {}).get("audit"), *w.get("lean_sources", []), *w.get("checked_inputs", {})]:
             if name:
