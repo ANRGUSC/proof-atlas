@@ -207,6 +207,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     assets = Path(__file__).resolve().parents[1] / "assets"
     rows, entries, log_links = [], [], {}
     stale = {}
+    unchecked = []
     subproof_lists = {}
     closed_results = 0
     for c in claims:
@@ -230,6 +231,8 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
                 set(audit["axioms"]) - {"propext", "Classical.choice", "Quot.sound"} or
                 any(part["status"] != "checked" for part in w.get("subproofs", []))):
                 raise ValueError(f"{cid}: closure requires matching audit evidence, correspondence and resolved obligations")
+            if not audit.get("statements"):
+                unchecked.append(cid)
             (output / "logs").mkdir(exist_ok=True)
             name = hashlib.sha256(receipt).hexdigest() + ".json"
             atomic(output / "logs" / name, receipt)
@@ -369,6 +372,9 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     atomic(output / "checkpoint.json", json.dumps(dict(revision=version)).encode())
     print(f"{len(claims)} claims | {output / 'progress.html'}")
     print(f"Authorized proof work: {scope}")
+    if unchecked:
+        print("Warning: these closures were audited without --statements, so their statements may depend on "
+              f"proof modules: {', '.join(unchecked)}. See 'Separate statements from proofs' in SKILL.md.")
     hosting = p.get("hosting") or {}
     if not hosting.get("repository") and hosting.get("decision") != "local":
         print("Hosting decision pending. Ask where the author wants this paper's explorer and dashboard hosted.")

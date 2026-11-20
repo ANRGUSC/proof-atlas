@@ -37,6 +37,56 @@ def import_headers(lake, paths, root, env):
     return imports
 
 
+def check_statements(lake, root, env, contract, expected, statements):
+    """Keep the expected proposition and its definitions apart from the proofs.
+
+    `statements` lists directories or files of the package holding the paper's
+    statements and definitions. Each of those modules may import only statement
+    modules and external libraries, and the expected proposition must be defined in
+    one of them. Lean resolves every constant from imports, so nothing the statement
+    mentions can then come from a proof module or from the contract file."""
+    files = set()
+    for name in statements:
+        path = (root/name).resolve(strict=True)
+        if not path.is_relative_to(root):
+            raise ValueError(f"Statement path outside the package: {name}")
+        found = sorted(path.rglob("*.lean")) if path.is_dir() else [path]
+        files.update(p.relative_to(root).as_posix() for p in found if p.suffix == ".lean")
+    if not files:
+        raise ValueError("No Lean files in the statement paths: " + ", ".join(statements))
+    modules = {f[:-5].replace("/", "."): f for f in files}
+    ordered = sorted(files)
+    rows = lake_json(lake, ["env", "lean", "--deps-json", "--stdin"], root, env, ("\n".join(ordered) + "\n").encode())
+    if len(rows) != 1 or len(rows[0]["imports"]) != len(ordered):
+        raise ValueError("Incomplete Lean import headers for the statement modules")
+    for path, item in zip(ordered, rows[0]["imports"]):
+        if item["errors"]:
+            raise ValueError(f"Lean could not read the imports of {path}")
+        for imp in item["result"]["imports"]:
+            name = imp["module"]
+            source = "/".join(name.split(".")) + ".lean"
+            if name not in modules and (root/source).is_file():
+                raise ValueError(f"Statement module {path} imports {name} ({source}), which is not a statement "
+                                 f"module. Move the definitions it needs into {', '.join(statements)}")
+    query = ("import Lean\n" + (root/contract).read_text(encoding="utf-8-sig") + "\n" +
+             f"#eval show Lean.CoreM Unit from do\n  let env ← Lean.getEnv\n  let n := ({json.dumps(expected)} : String).toName\n"
+             "  IO.println s!\"PROOF-ATLAS-MODULE {(env.getModuleIdxFor? n).map (env.allImportedModuleNames[·]!)}\"\n")
+    result = subprocess.run([*lake, "env", "lean", "--stdin"], input=query.encode(), cwd=root, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    output = result.stdout.decode("utf-8-sig", errors="replace")
+    found = re.findall(r"^PROOF-ATLAS-MODULE (none|\(some (\S+)\))$", output, re.M)
+    if result.returncode or len(found) != 1:
+        raise ValueError("Could not locate the expected proposition:\n" + output)
+    module = found[0][1]
+    if module not in modules:
+        where = (f"the contract {contract}" if not module else
+                 f"{module} ({'/'.join(module.split('.'))}.lean)" if (root/("/".join(module.split(".")) + ".lean")).is_file()
+                 else f"the external module {module}")
+        raise ValueError(f"The expected proposition {expected} is defined in {where}, which is not a statement module. "
+                         f"Define it in {', '.join(statements)}")
+    return sorted(modules)
+
+
 def module_inputs(lake, root, env, targets, contract):
     # Only use module-to-path correspondence for ordinary root-source Lake packages.
     # Executable/custom Lake configurations can read arbitrary files.
@@ -144,6 +194,13 @@ def audit(args):
     additional = set(axioms) - {"propext", "Classical.choice", "Quot.sound"}
     if additional:
         raise ValueError("Declaration uses additional axioms: "+", ".join(sorted(additional)))
+    statements = list(getattr(args, "statements", None) or [])
+    if statements:
+        check_statements(lake, root, env, contract_path, args.expected, statements)
+    else:
+        print("Warning: no --statements path was given, so nothing checks that the expected proposition "
+              "and its definitions are independent of the proof modules. Older atlases keep working; "
+              "see 'Separate statements from proofs' in SKILL.md to migrate.", file=sys.stderr)
     if scoped is None:
         final = inputs(root)
     else:
@@ -157,7 +214,7 @@ def audit(args):
     return dict(declaration=declaration, contract=contract.relative_to(root).as_posix(),
                 expected=args.expected, toolchain=pin, axioms=axioms,
                 targets=args.target, input_scope="module-closure" if scoped is not None else "full-package",
-                checked_inputs=initial, lean_output=output.strip())
+                checked_inputs=initial, statements=statements, lean_output=output.strip())
 
 
 if __name__ == "__main__":
@@ -167,6 +224,8 @@ if __name__ == "__main__":
     parser.add_argument("expected", help="Name of the independent proposition")
     parser.add_argument("declaration", help="Name of the proof to check")
     parser.add_argument("--target", action="append", default=[], help="Build this proof module before checking its independent contract")
+    parser.add_argument("--statements", action="append", default=[],
+                        help="Directory or file holding the paper's statements and definitions; they may not import proof modules")
     parser.add_argument("--output", type=Path, help="New evidence file to create on success")
     args = parser.parse_args()
     try:

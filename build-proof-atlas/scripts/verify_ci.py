@@ -56,7 +56,8 @@ def verify(root):
                 imports = import_headers(["lake"], [prior["contract"]], package, os.environ)
                 targets = sorted(m for m in imports if (package / (m.replace(".", "/") + ".lean")).is_file())
             checked = audit(SimpleNamespace(package=package, contract=prior["contract"], target=targets,
-                                            expected=prior["expected"], declaration=prior["declaration"]))
+                                            expected=prior["expected"], declaration=prior["declaration"],
+                                            statements=prior.get("statements", [])))
             result["claims"][label] = dict(audit_sha256=digest, declaration=checked["declaration"],
                                             expected=checked["expected"], axioms=checked["axioms"],
                                             toolchain=checked["toolchain"])
