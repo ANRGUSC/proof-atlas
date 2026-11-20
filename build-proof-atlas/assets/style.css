@@ -1,0 +1,15 @@
+:root {color-scheme:light; font:16px/1.55 "Segoe UI",sans-serif;color:#19312e;background:#f5f6f1}
+* {box-sizing:border-box}
+body {max-width:68rem;margin:auto;padding:1.5rem clamp(1rem,4vw,3rem) 4rem}
+nav {display:flex;gap:1.5rem;border-bottom:1px solid #b5c7bd;padding:.5rem 0 1rem}
+a {color:#005d51;text-underline-offset:.2em}
+h1,h2 {font-family:Georgia,serif;font-weight:500;line-height:1.2}
+h1 {font-size:clamp(2rem,5vw,3.5rem);max-width:22ch;margin-bottom:.5rem}
+article,section {padding:1.25rem clamp(1rem,3vw,2rem);background:white;border:1px solid #ced9cf;border-radius:.4rem;margin:1rem 0}
+article:target {border-color:#28746b}
+h2 {margin-top:.3rem}
+small,time {color:#475d55}
+details {border-top:1px solid #e0e6df;padding:.7rem 0}
+summary {cursor:pointer;color:#134f47;font-weight:600}
+pre {white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f0;padding:1rem;font-size:.88rem}
+li {margin:.4rem 0}

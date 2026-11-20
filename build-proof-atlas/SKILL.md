@@ -1,0 +1,44 @@
+---
+name: build-proof-atlas
+description: Build or resume a source-linked proof atlas from a theory paper, open a four-view Proof Atlas explorer and a live progress dashboard, and expose the distinction between paper claims, proof attempts and checked results.
+metadata:
+  version: "0.4.0"
+---
+
+# Build a Proof Atlas
+
+Bind the requested edition first. Compare the title, version, TeX and PDF. Record the source revision and SHA-256 digests. If an unversioned URL and a local checkout disagree, check the version-specific record and submission archive. Distinguish a local PDF from the PDF served by a publisher.
+
+Record the edition's canonical HTTP(S) URL in `project.json` as `publication` and its human-readable citation in `edition`. Each build links that citation and the exact bundled manuscript PDF in the explorer and dashboard headers. When hosting is configured or moved, refresh the paper repository's renderer snapshot (or pinned release), rebuild, and verify both header links from the deployed explorer and dashboard. The PDF link resolves under the site's own base path. For an unpublished manuscript, leave the citation as text and keep the PDF link active.
+
+## Start a project
+
+**Ask where the author wants to host this paper's Proof Atlas.** At first setup, propose a specific repository based on the paper slug and any organization the author already named. Ask only for unresolved choices: owner/repository, visibility, and whether to publish the reader and dashboard as a website. Offer local-only when hosting has not been requested. Accept a custom destination or an existing repository. Continue the local import and preview while waiting. Reuse a previously chosen destination on resume. Keep the reusable skill independently distributable.
+
+Once the author selects hosting, the agent provisions or connects the repository and pushes the paper-specific project. Include the manuscript inputs, editable claim and dependency data, Lean sources and lockfile, selected build evidence, and reproducible renderer tooling or a pinned renderer release. Exclude installed toolchains, dependency caches, and unrelated workspace files. Use project-relative paths and review the outbound file list. When Pages is selected, configure the deployment, wait for the published build, and test the explorer, a deep-linked claim and graph, dashboard, PDF and evidence under the repository subpath. Report the repository and verified site URLs. For GitHub Pages with a renderer snapshot at `tools/proof-atlas`, adapt [the Pages workflow](references/github-pages.yml). Save the destination in project.json under `hosting`, separately from the manuscript's source repository.
+
+Place project data in the author's chosen output directory. Keep this skill directory portable. The current helper reads explicitly listed UTF-8 source files in manuscript order. Follow TeX includes yourself and supply each file. Inspect the inventory for custom macros, unlabeled claims, assumptions in prose and detached proofs. Reconcile these before claiming complete coverage.
+
+Create a UTF-8 `project.json` with `schema_version` set to 1, `title`, `edition`, `revision`, `tex` (ordered array of records with `path` and `sha256`), `pdf` (same record shape), and `environments` (array of theorem environment names). Paths are relative to the project. Optional `focus` is a TeX label. Optional `work` contains per-label checkpoints as described below.
+
+**Launch both views on first import.** As soon as the initial project and source inventory are available, the agent runs `python <skill>/scripts/preview.py <project-directory> --open` and keeps the local preview running during formalization. This performs the first build before serving or opening anything. In a headless host omit `--open` and report the two printed URLs. If desktop launch is provided separately by the host, open both URLs there. Reuse an existing preview for the same project. Include the full absolute HTML paths when reporting local files.
+
+The preview produces the reader at `dist/proofs/index.html` and the separate dashboard at `dist/progress.html`. A new project immediately has a searchable inventory, four reading views, and an initially empty dependency map. Missing proof material is shown as pending. As the agent saves project records, companion text, selected Lean sources or evidence, the preview rebuilds both pages and open HTTP tabs reload at the same claim and view. Checkpoint after each meaningful proof attempt or discovery. For CI or a static snapshot, run `python <skill>/scripts/atlas.py build <project-directory>`; the same command generates both entry points. Direct file opens show the last snapshot.
+
+**Populate the public explorer.** Optional `reader` in project.json points to a UTF-8 JSON object with `schema_version: 1`, a `claims` mapping keyed by label, and a `dependencies` list. Claim metadata can include a printed `reference`, checked PDF `page`, `summary`, `sketch`, project-relative `lamport` Markdown file, `origin`, and `source_url`. Preserve existing structured proofs and their provenance. Edges contain `claim`, `prerequisite`, and `reason`. Identify the covered mathematical step when a claim has several conclusions. Record only substantiated edges. Test a claim, graph neighbor, all four reading views, the exact PDF page and a verification log through the actual preview. On first use, also demonstrate that an open dashboard and reader reflect a saved checkpoint.
+
+## Work on a claim
+
+Start with a claim requested by the author, or one with a tractable prerequisite. Capture the intended Lean type separately from the proof. Record the hypotheses inherited from earlier passages, any stronger or weaker formalization, and which conclusions remain. Keep a subclaim attached to its parent. Maintain the manuscript statement even when a boundary case fails. Continue independent claims while recording questions for the author.
+
+Use the paper's Lean package when possible. Pin any new toolchain and dependencies. Run the selected proof and check its type against the independent statement. An assembled proof also needs an audit of transitive axioms, unresolved paper prerequisites and the exact inputs to the run before awarding release verification. A successful tactic experiment or a build log alone establishes less. The current checkpoint renderer only displays work in progress and never issues verification badges.
+
+**The agent owns setup and execution.** As soon as the Lean package has a toolchain pin and a Lake configuration, run `python <skill>/scripts/check_lean.py <lean-package> --logs <project>/evidence`. On each run the helper locates Elan or a matching native Lean/Lake installation, checks the default WSL distribution on Windows when needed, and falls back to an official noninteractive Elan installation scoped to the package. Elan obtains the project-pinned toolchain, which includes Lake. The helper builds the default targets and preserves its command output. Include the independent type check and axiom inspection in those targets.
+
+Follow the build through completion and diagnose any failed step. Reuse an authorized existing runner or cache when available. If access controls prevent both execution and installation, record the exact denied operation, log and resume condition in the checkpoint. Ask the author only for the permission or mathematical decision that the agent cannot supply. The agent handles installer commands, builds and logs.
+
+For a first proof with a few Mathlib imports, pass `--mathlib-module <module>` once per direct Mathlib import to fetch the required precompiled modules and their dependencies. Once the lockfile, toolchain, and dependencies are present, use `--offline` to check a repeat build with tool installation, remote Git transfers and Lake cache downloads disabled.
+
+To let readers inspect the recorded check, set the checkpoint's optional `run_log` to the project-relative path of the selected log and rebuild. The renderer copies that log to the static site and links it from the claim and the current target. Describe exactly which declarations the run covered and keep the parent claim open while obligations remain.
+
+Under `work`, key each checkpoint by its claim label. Supply `summary`, `step`, `next`, `status` and `updated` (UTC). Allowed statuses are `open`, `drafted`, `blocked` and `attempted`. Optional fields are `scope` for correspondence notes, `sketch` for the English argument, `structured` for attributed proof steps, `lean` for a project-relative Lean source file, and `page` for a checked one-based PDF page index. Give structured steps explicit provenance and preserve gaps. Record failures as checkpoints with diagnostics and a concrete next step. Resume by reading the focus and checkpoint in ordinary project files.
