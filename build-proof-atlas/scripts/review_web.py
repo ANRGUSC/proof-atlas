@@ -11,7 +11,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import urlopen
 
-from author_review import BADGE, decide, digest, get_packet, review_url
+from author_review import ADVICE, BADGE, decide, digest, get_packet, review_url
+import manuscript_edits
 
 
 def document(title,body,base="../"):
@@ -19,7 +20,7 @@ def document(title,body,base="../"):
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
             f'<title>{esc(title)} · Proof Atlas</title><link rel="stylesheet" href="{base}review.css"></head><body>'
             f'<header><a href="{base}index.html">Proof Atlas<span>.</span></a><nav><a href="{base}review.html">Review queue</a> '
-            f'<a href="{base}progress.html">Dashboard</a> <a href="{base}guide.html">How to use this atlas</a></nav></header>'
+            f'<a href="{base}edits.html">Manuscript edits</a> <a href="{base}progress.html">Dashboard</a> <a href="{base}guide.html">How to use this atlas</a></nav></header>'
             f'<main>{body}</main></body></html>').encode()
 
 
@@ -28,6 +29,26 @@ def render(data,secret=None,notice=""):
     v=data["view"]
     cid=esc(data["id"])
     def para(value): return f'<p>{esc(value)}</p>' if value else ""
+    def analysis_panel(view, feedback_open=False):
+        analysis = view.get("analysis")
+        if not analysis:
+            return ""
+        rows = "".join(
+            "<tr><th scope=\"row\">"+esc(row["case"])+"</th>"+
+            "".join("<td>"+esc(row[k])+"</td>" for k in ("paper","lean","why"))+"</tr>"
+            for row in analysis["cases"])
+        parts = ['<section class="analysis"><h2>How the statements compare</h2>', para(analysis["summary"]),
+                 '<div class="case-table"><table><caption>Case-by-case comparison</caption><thead><tr>',
+                 '<th>Case</th><th>Paper</th><th>Checked Lean statement</th><th>Why</th></tr></thead><tbody>',
+                 rows, '</tbody></table></div><h3>Scope of the conclusion</h3>', para(analysis["scope"])]
+        if feedback_open:
+            parts.append('<h3>Author feedback is open</h3><p>Review the reported difference below before deciding.</p>')
+        else:
+            parts.extend(['<aside><h3>Agent recommendation · '+esc(ADVICE[view["result"]])+'</h3>', para(analysis["advice"])])
+            if wording := analysis.get("suggested_feedback"):
+                parts.extend(['<h4>Suggested wording for feedback</h4><blockquote>', esc(wording), '</blockquote>'])
+            parts.append('</aside>')
+        return "".join(parts)+'</section>'
     def sources(items):
         return ''.join(f'<details><summary>{esc(s["name"])} · {esc(s["file"])} L{s["lines"][0]}</summary>'
                        f'<pre>{esc(s["text"])}</pre></details>' for s in items)
@@ -37,9 +58,11 @@ def render(data,secret=None,notice=""):
                 '<section><h2>What Lean proved</h2><small>Mathematical reading of the audited Lean statement</small>'+para(view["lean_reading"] or "The agent has not supplied a current independent reading.")+
                 para(view["lean_refs"])+'</section></div>')
     body=f'<p>{esc(v["edition"])} · {cid}</p><h1>{esc(data["title"])}</h1>'
-    body+=para(notice)+para(data["assessment"])+columns(v)
+    body+=para(notice)+para(data["assessment"])+analysis_panel(v,data["feedback_open"])+columns(v)
     if data["approved"]:
         body+=para(BADGE+" · "+data["events"][-1]["by"])
+        if data["approved_before_analysis"]:
+            body+=para("The author approved these same two readings before the case-by-case analysis was added.")
     elif any(e["decision"]=="approve" for e in data["events"]):
         body+=para("The earlier approval is historical. A fresh review is available after the current comparison is ready.")
     page = data.get("page")
@@ -54,7 +77,9 @@ def render(data,secret=None,notice=""):
         body+=('<form method="post"><h2>Does the statement shown here match your paper’s theorem, including its assumptions and conclusion?</h2>'
                f'<input type="hidden" name="csrf" value="{esc(secret)}"><input type="hidden" name="token" value="{esc(data["token"])}">'
                '<label>Your name<input name="by" autocomplete="name"></label><label>Difference or question (for the proof agent)'
-               '<textarea name="comment" rows="2"></textarea></label><div class="buttons">')
+               '<textarea name="comment" rows="2"></textarea></label>'
+               '<label>Suggested manuscript edit (optional)<textarea name="paper_edit" rows="2"></textarea></label>'
+               '<p>A suggestion saved with an approval or difference appears in <a href="../edits.html">Manuscript edits</a>.</p><div class="buttons">')
         if data["ready"]:
             body+='<button name="decision" value="approve">Yes, these match</button>'
         body+=('<button name="decision" value="difference">I see a difference</button>'
@@ -67,7 +92,7 @@ def render(data,secret=None,notice=""):
     for e in reversed(data["events"]):
         label=BADGE if e["decision"]=="approve" else "Difference reported"
         body+=(f'<details><summary>{esc(label)} · {esc(e["by"])} · {esc(e["at"])}</summary>'+para(e["comment"])+
-               para(e["view"]["edition"])+columns(e["view"])+sources(e.get("sources",[]))+'</details>')
+               para(e["view"]["edition"])+analysis_panel(e["view"])+columns(e["view"])+sources(e.get("sources",[]))+'</details>')
     return document(data["title"],body)
 
 
@@ -113,6 +138,8 @@ def serve(root,open_browser=True,port=0):
             path=urlsplit(self.path).path
             if path=="/session":
                 return self.reply(key.encode())
+            if path=="/edits.html":
+                return self.reply(manuscript_edits.render(root,secret))
             if path.startswith("/review/") or path=="/review.html":
                 try:
                     ids=claims()
@@ -132,13 +159,19 @@ def serve(root,open_browser=True,port=0):
                     return self.send_error(415)
                 size=int(self.headers.get("Content-Length","0"))
                 if not 0<size<=32768: return self.send_error(413)
-                form={k:v[0] for k,v in parse_qs(self.rfile.read(size).decode(),keep_blank_values=True).items()}
+                values=parse_qs(self.rfile.read(size).decode(),keep_blank_values=True)
+                form={k:v[0] for k,v in values.items()}
                 if not secrets.compare_digest(form["csrf"],secret): return self.send_error(403)
                 path=urlsplit(self.path).path
-                cid=claims()[path]
-                decide(root,cid,form["token"],form["decision"],form.get("by",""),form.get("comment",""))
+                if path=="/edits.html":
+                    manuscript_edits.update(root,form["token"],form["action"],values.get("selected",[]))
+                    location=path
+                else:
+                    cid=claims()[path]
+                    decide(root,cid,form["token"],form["decision"],form.get("by",""),form.get("comment",""),form.get("paper_edit",""))
+                    location="/review.html" if form["decision"]=="skip" else path+"?saved"
                 self.send_response(303)
-                self.send_header("Location","/review.html" if form["decision"]=="skip" else path+"?saved")
+                self.send_header("Location",location)
                 self.end_headers()
             except (ValueError,KeyError,OSError) as error:
                 self.reply(document("Review needs attention",'<h1>Review needs attention</h1><p>'+html.escape(str(error))+

@@ -1,6 +1,7 @@
 """Build a local, read-only view of an author's checkpoint records (Python 3.9+)."""
 import author_review as reviews
 import review_web
+import manuscript_edits
 import argparse
 import hashlib
 import html
@@ -97,7 +98,7 @@ def masthead(project, first):
     return (f'<header class="mast"><a class="wordmark" href="index.html">Proof Atlas<span>.</span></a>'
             f'<nav aria-label="Project"><a data-nav="home" href="index.html">Overview</a>'
             f'<a data-nav="reader" href="{claim}">Claim reader</a><a data-nav="graph" id="graph-nav" href="{graph}">Dependency graph</a>'
-            '<a data-nav="progress" href="progress.html">Dashboard</a> <a href="review.html">Author review</a></nav>'
+            '<a data-nav="progress" href="progress.html">Dashboard</a> <a href="review.html">Author review</a> <a href="edits.html">Manuscript edits</a></nav>'
             '<details id="about-atlas" class="citation"><summary>Paper &amp; citation</summary><div>'
             f'<h2>About this atlas</h2><p>{paper_citation(project)}</p>'
             f'<p>{esc(project.get("paper_overview", ""))}</p><p><a href="manuscript.pdf">Manuscript PDF</a></p>'
@@ -393,6 +394,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     reviewed = sum(bool(e["verification"].get("approved")) for e in results)
     pending = f" · {machine}/{total_results} machine verified · {reviewed}/{total_results} author reviewed"
     atomic(output/"review.html",review_web.queue(review_entries))
+    atomic(output/"edits.html",manuscript_edits.render(root))
     shutil.copyfile(assets/"review.css",output/"review.css")
     guide = (assets.parent/"references"/"author-guide.md").read_text(encoding="utf-8")
     sections = []

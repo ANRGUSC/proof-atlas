@@ -12,7 +12,7 @@ from atlas import atomic, build_local, local
 
 
 def inputs(root):
-    paths = {root / "project.json", root / "reviews.json", root / "comparisons.json"}
+    paths = {root / "project.json", root / "reviews.json", root / "comparisons.json", root / "manuscript-edits.json"}
     p = json.loads((root / "project.json").read_text(encoding="utf-8-sig"))
     paths.update(local(root, src["path"]) for src in [p["pdf"], *p["tex"]])
     if figure := p.get("folio", {}).get("figure"):

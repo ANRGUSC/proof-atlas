@@ -8,6 +8,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 BADGE = "Author reviewed the theorem statement proved in Lean"
+ADVICE = {"match": "Recommend approval", "difference": "Report a difference", "unsure": "Hold approval for clarification"}
+
+
+def validate_analysis(analysis, result):
+    def present(obj, fields):
+        return isinstance(obj, dict) and all(isinstance(obj.get(k), str) and obj[k].strip() for k in fields)
+
+    if not present(analysis, ("summary", "scope", "advice")):
+        raise ValueError("Supply a comparison summary, its scope and claim-specific author advice")
+    cases = analysis.get("cases")
+    if not isinstance(cases, list) or not cases or not all(present(row, ("case", "paper", "lean", "why")) for row in cases):
+        raise ValueError("Explain at least one case with its paper claim, Lean claim and mathematical justification")
+    if (result != "match" or "suggested_feedback" in analysis) and not present(analysis, ("suggested_feedback",)):
+        raise ValueError("Supply suggested feedback the author can use to describe the difference or question")
 
 
 def digest(value):
@@ -53,13 +67,19 @@ def packet(root, project, claim, work, audit, comparison, events, checked):
     comp = comparison if current else {}
     view = dict(bindings=keys, excerpt=claim["excerpt"], edition=project["edition"],
                 **{k:comp.get(k, "") for k in fields})
+    if "analysis" in comp:
+        validate_analysis(comp["analysis"], comp["result"])
+        view.update(analysis=comp["analysis"], result=comp["result"])
     version = digest(view)
     last = events[-1] if events else {}
     resolved = comp.get("resolves", []) if comp.get("resolution") else []
     outstanding = [e for e in events if e["decision"] == "difference" and e["id"] not in resolved]
     machine_issue = (comparison or {}).get("result") in ("difference", "unsure")
     disputed = bool(outstanding or machine_issue)
-    approved = checked and comp.get("result") == "match" and not disputed and last.get("decision") == "approve" and last.get("version") == version
+    original_view = {k:v for k,v in view.items() if k not in ("analysis","result")}
+    prior_readings = ("analysis" in view and last.get("view") == original_view and
+                      last.get("version") == digest(original_view))
+    approved = checked and comp.get("result") == "match" and not disputed and last.get("decision") == "approve" and (last.get("version") == version or prior_readings)
     if outstanding:
         issue, actor, step = " · ".join(e["comment"] for e in outstanding), "Proof agent", "Investigate the reported difference and record a resolution."
     elif machine_issue:
@@ -70,12 +90,15 @@ def packet(root, project, claim, work, audit, comparison, events, checked):
         issue, actor, step = "", "Proof agent", "Refresh the legacy audit to record statement fingerprints for optional review."
     elif not comp:
         issue, actor, step = "", "Proof agent", "Prepare independent paper and Lean readings."
+    elif "analysis" not in comp:
+        issue, actor, step = "", "Proof agent", "Add the case-by-case justification and recommendation."
     else:
         issue, actor, step = "", "Author (optional)", "Review the comparison whenever convenient."
     return dict(id=claim["id"], title=claim["title"], view=view, version=version,
                 token=digest([version, comparison, last.get("id"), checked]), events=events,
                 checked=checked, approved=bool(approved), disputed=disputed,
-                ready=bool(checked and comp.get("result")=="match" and not disputed),
+                ready=bool("analysis" in view and comp.get("result")=="match" and not disputed),
+                feedback_open=bool(outstanding), approved_before_analysis=bool(approved and prior_readings),
                 assessment={"match":"Automated comparison found no discrepancy","difference":"Difference found",
                             "unsure":"Interpretation unresolved"}.get(comp.get("result"), "Comparison pending"),
                 issue=issue, actor=actor, next=step, resolution=comp.get("resolution",""))
@@ -141,7 +164,7 @@ def project_lock(root):
         yield
 
 
-def decide(root,cid,token,decision,by,comment=""):
+def decide(root,cid,token,decision,by,comment="",paper_edit=""):
     from atlas import atomic
     if decision not in ("approve","difference","skip"):
         raise ValueError("Unknown decision")
@@ -157,6 +180,8 @@ def decide(root,cid,token,decision,by,comment=""):
             raise ValueError("Approval requires a current checked comparison with no outstanding difference.")
         event = dict(by=by.strip(), decision=decision, comment=comment.strip(), version=data["version"],
                      at=datetime.now(timezone.utc).isoformat(), view=data["view"], sources=data["sources"])
+        if paper_edit.strip():
+            event["paper_edit"] = paper_edit.strip()
         event["id"] = digest(event)
         path = root/"reviews.json"
         book = read(path, {"version":1,"claims":{}})
@@ -179,6 +204,7 @@ def save_comparison(root,cid,record):
         result = record.get("result")
         if result not in ("match","difference","unsure"):
             raise ValueError("Choose match, difference or unsure")
+        validate_analysis(record.get("analysis"), result)
         if result != "match" and (record.get("actor") not in ("Proof agent","Author") or
                                   not all(isinstance(record.get(k),str) and record[k].strip() for k in ("issue","next"))):
             raise ValueError("Record the precise issue, next actor and action")
@@ -206,6 +232,16 @@ def terminal(root,labels,by,ask=input):
         if not labels and (data["approved"] or not data["checked"]):
             continue
         print(cid, data["view"]["edition"], data["view"]["excerpt"], sep="\n")
+        view=data["view"]
+        if analysis := view.get("analysis"):
+            print("Agent analysis", analysis["summary"], sep="\n")
+            for row in analysis["cases"]:
+                print(row["case"], "Paper: "+row["paper"], "Lean: "+row["lean"], row["why"], sep="\n")
+            print("Scope", analysis["scope"], sep="\n")
+            if not data["feedback_open"]:
+                print(ADVICE[view["result"]], analysis["advice"], sep="\n")
+                if analysis.get("suggested_feedback"):
+                    print("Suggested feedback", analysis["suggested_feedback"], sep="\n")
         for key in ("paper_reading","paper_refs","lean_reading","lean_refs"):
             print(data["view"][key])
         for source in data["sources"]:

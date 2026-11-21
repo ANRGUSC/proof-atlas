@@ -57,6 +57,11 @@ class StatementApproval(unittest.TestCase):
     def compare(self, result="match", **updates):
         record = dict(bindings=self.packet()["view"]["bindings"], result=result, paper_reading="For n=0 the rate is positive.",
                       lean_reading="The rate at zero exceeds zero.", paper_refs="paper.tex, theorem t", lean_refs="Statement and rate")
+        record["analysis"] = dict(summary="Compare the rate at zero.", scope="Only n=0 is asserted.",
+                                  cases=[dict(case="Zero", paper="Positive", lean="0 < rate 0", why="rate 0 = 1")],
+                                  advice="Check the value at zero.")
+        if result != "match":
+            record["analysis"]["suggested_feedback"] = "Please clarify the domain at zero."
         record.update(updates)
         review.save_comparison(self.root,"t",record)
 
@@ -103,3 +108,52 @@ class StatementApproval(unittest.TestCase):
         self.assertTrue(self.packet()["approved"])
         self.assertIn("1/1 author reviewed",(self.root/"dist/progress.html").read_text(encoding="utf8"))
         self.assertEqual(self.packet()["events"][-1]["decision"],"approve")
+
+    def test_explanation_is_versioned_and_advice_tracks_feedback(self):
+        from review_web import render
+        self.compare()
+        packet = self.packet()
+        review.decide(self.root,"t",packet["token"],"approve","Test author")
+        revised = dict(packet["view"]["analysis"], advice="Approve for the zero input only.")
+        self.compare(analysis=revised)
+        self.assertFalse(self.packet()["approved"])
+        self.assertNotEqual(self.packet()["events"][0]["view"]["analysis"],revised)
+        self.assertIn(b"Approve for the zero input only.",render(self.packet()))
+        review.decide(self.root,"t",self.packet()["token"],"difference","Author","Does this include other inputs?")
+        self.assertNotIn(b"Approve for the zero input only.",render(self.packet()).split(b"<h2>Review history</h2>")[0])
+        self.compare("unsure",issue="Scope unclear",actor="Proof agent",next="Check the domain")
+        with self.assertRaises(ValueError):
+            self.compare("unsure",analysis=revised,issue="Scope unclear",actor="Proof agent",next="Check the domain")
+
+    def test_legacy_comparison_and_changed_sources(self):
+        self.compare()
+        path = self.root/"comparisons.json"
+        records = json.loads(path.read_bytes())
+        del records["t"]["analysis"]
+        path.write_text(json.dumps(records),encoding="utf-8")
+        self.assertFalse(self.packet()["ready"])
+        self.assertIn("justification",self.packet()["next"])
+        self.compare()
+        self.receipt({"Statement":"c"*64})
+        self.assertNotIn("analysis",self.packet()["view"])
+
+    def test_manuscript_edits_can_be_cleared_and_restored_independently(self):
+        import manuscript_edits as edits
+        self.compare()
+        review.decide(self.root,"t",self.packet()["token"],"approve","Author",paper_edit="Use explicit inequality.")
+        first = self.packet()["events"][-1]["id"]
+        path = self.root/"manuscript-edits.json"
+        path.write_text(json.dumps({"version":1,"edits":{"typo":{"claim":"t","edition":"test","reason":"Typo"}}}))
+        def apply(action, selected):
+            edits.update(self.root,edits.token(*edits.inventory(self.root)),action,selected)
+        old = edits.token(*edits.inventory(self.root))
+        apply("clear",[first])
+        with self.assertRaisesRegex(ValueError,"Reload"):
+            edits.update(self.root,old,"clear-all",[])
+        self.assertIn(b"Active (1)",edits.render(self.root))
+        apply("clear-all",[])
+        self.assertIn(b"Cleared (2)",edits.render(self.root))
+        apply("restore",[first,"typo"])
+        apply("request",[first])
+        self.assertEqual(edits.inventory(self.root)[1][first]["status"],"Draft requested")
+        self.assertTrue(self.packet()["approved"])

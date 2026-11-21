@@ -2,7 +2,7 @@
 name: build-proof-atlas
 description: Build or resume a source-linked proof atlas from a theory paper, open a four-view Proof Atlas explorer and a live progress dashboard, and expose the distinction between paper claims, proof attempts and checked results.
 metadata:
-  version: "0.8.0"
+  version: "0.9.0"
 ---
 
 # Build a Proof Atlas
@@ -15,7 +15,7 @@ Record the edition's canonical HTTP(S) URL in `project.json` as `publication` an
 
 On the first build, open the explorer and dashboard and give their full URLs or absolute paths, the current claim, the authorized stopping point, and the phrase “Open the local review dashboard for this paper.” Point readers to **How to use this atlas**. Start or reuse the local review server whenever requested, including during proof work or on a later day.
 
-Read new review feedback at checkpoints and on resume. For every paper claim, run the [independent correspondence workflow](references/correspondence.md) at statement preparation and again on checked evidence. Resolve discrepancies and continue the authorized scope. The dashboard reports formal checks, optional author review, outstanding differences and the next actor separately. A known mismatch reopens the paper obligation while preserving evidence for the actual formal result. Human review is optional and never gates an otherwise completed proof run. Only a human records author decisions. For review, migration or publication use the [author guide](references/author-guide.md).
+Read new review feedback at checkpoints and on resume. For every paper claim, run the [independent correspondence workflow](references/correspondence.md) at statement preparation and again on checked evidence. Automatically write the author-facing analysis when each claim is checked and backfill missing analyses when resuming an older atlas. Show why the cases agree or differ, identify the scope, and recommend approval, a specific correction, or a clarification. Resolve discrepancies and continue the authorized scope. The dashboard reports formal checks, optional author review, outstanding differences and the next actor separately. A known mismatch reopens the paper obligation while preserving evidence for the actual formal result. Human review is optional and never gates an otherwise completed proof run. Only a human records author decisions. For review, migration or publication use the [author guide](references/author-guide.md).
 
 ## Start a project
 

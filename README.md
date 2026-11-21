@@ -15,7 +15,7 @@ Proof Atlas is a skill for turning a mathematics paper into a website where read
 
 ![Local review example showing the paper and Lean readings above the author’s three choices.](docs/author-review.png)
 
-The page pairs the readings with their sources. A decision is optional. The reviewer can inspect the exact Lean and its definitions below the comparison. [Full author guide](build-proof-atlas/references/author-guide.md) · [Skill instructions](build-proof-atlas/SKILL.md).
+Each checked claim gets a case-by-case analysis, the mathematical reason for agreement or disagreement, and a recommendation for the author. The review page includes the precise sources and suggested feedback when clarification is needed. Wording suggestions go in **Manuscript edits**, where authors can request a draft or clear one, several, or all handled suggestions. [Full author guide](build-proof-atlas/references/author-guide.md) · [Skill instructions](build-proof-atlas/SKILL.md).
 
 ## Try it on a real theorem
 
