@@ -59,7 +59,7 @@ class StatementApproval(unittest.TestCase):
         record = dict(bindings=self.packet()["view"]["bindings"], result=result, paper_reading="For n=0 the rate is positive.",
                       lean_reading="The rate at zero exceeds zero.", paper_refs="paper.tex, theorem t", lean_refs="Statement and rate")
         record["analysis"] = dict(summary="Compare the rate at zero.", scope="Only n=0 is asserted.",
-                                  cases=[dict(case="Zero", paper="Positive", lean="0 < rate 0", why="rate 0 = 1")],
+                                  cases=[dict(case="Zero", paper="Positive", lean="0 < rate 0", why="rate 0 = 1", kind="agrees")],
                                   advice="Check the value at zero.")
         if result != "match":
             record["analysis"]["suggested_feedback"] = "Please clarify the domain at zero."
@@ -137,6 +137,44 @@ class StatementApproval(unittest.TestCase):
         self.compare()
         self.receipt({"Statement":"c"*64})
         self.assertNotIn("analysis",self.packet()["view"])
+
+    def test_difference_kinds(self):
+        from review_web import render
+        self.compare()
+        legacy = json.loads((self.root/"comparisons.json").read_bytes())
+        del legacy["t"]["analysis"]["cases"][0]["kind"]
+        (self.root/"comparisons.json").write_text(json.dumps(legacy), encoding="utf-8")
+        review.decide(self.root, "t", self.packet()["token"], "approve", "Author")
+        # A record saved before kinds existed keeps its approval and displays as not classified.
+        old = self.packet()
+        self.assertTrue(old["approved"])
+        self.assertIn(b"<small>not classified</small>", render(old))
+        def build():
+            with redirect_stdout(io.StringIO()):
+                atlas.build(self.root)
+            data = (self.root/"dist/proofs/index.html").read_text(encoding="utf-8")
+            return (self.root/"dist/progress.html").read_text(encoding="utf-8"), data
+        page, data = build()
+        self.assertIn('"differences": null', data)
+        self.assertNotIn("from the paper</a>", page)
+        # New records must classify every case, with a known kind.
+        analysis = old["view"]["analysis"]
+        with self.assertRaisesRegex(ValueError, "Give each case a kind"):
+            self.compare(analysis=analysis)
+        with self.assertRaisesRegex(ValueError, "Give each case a kind"):
+            self.compare(analysis=dict(analysis, cases=[dict(analysis["cases"][0], kind="weaker")]))
+        self.compare()
+        self.assertNotEqual(self.packet()["version"], old["version"])
+        self.assertFalse(self.packet()["approved"])
+        page, data = build()
+        self.assertIn('"differences": []', data)
+        self.assertIn("No differences from the paper", page)
+        extra = dict(case="Negative", paper="Not stated", lean="Also for n < 0", why="Lean covers more", kind="stronger")
+        self.compare(analysis=dict(analysis, cases=[dict(analysis["cases"][0], kind="agrees"), extra]))
+        page, data = build()
+        self.assertIn("1 difference from the paper", page)
+        self.assertIn('"differences": [{"case": "Negative"', data)
+        self.assertIn(b"<small>stronger</small>", render(self.packet()))
 
     def test_manuscript_edits_can_be_cleared_and_restored_independently(self):
         import manuscript_edits as edits
