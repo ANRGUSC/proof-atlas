@@ -111,6 +111,12 @@ function proofView(c,view) {
     if(c.log) checks.append(link("Lean run log",c.log));
     if(v.remote && !v.evidence) checks.append(link(v.remote,v.url));
     pane.append(checks);
+    if(c.hypotheses){
+      // The audit derived this proposition from the statement and checked the example proves it.
+      const note=el("p","The hypotheses can hold. ","muted");
+      note.append(el("code",c.hypotheses.declaration),document.createTextNode(" proves:"));
+      pane.append(note,el("pre",c.hypotheses.proposition));
+    } else if(c.audit_log) pane.append(el("p","No checked example shows the hypotheses can hold.","muted"));
     pane.append(rich(c.scope || "No Lean formalization has been selected for this claim."));
     if(c.subproofs?.length){
       const list=el("ol");
