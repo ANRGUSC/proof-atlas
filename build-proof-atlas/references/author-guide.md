@@ -30,6 +30,8 @@ A verified upper bound stays available if the paper also needs a lower bound. Th
 
 ## Where do suggested paper changes go?
 
+An optional **Lean proves more** note identifies extra results that come with the proof. You can accept coverage of the paper and add your own wording in **Scope note to display with my approval**. That note accompanies your current approval in the explorer. A scope note explains what was checked. Use **Suggested manuscript edit** when you want a change tracked for the paper.
+
 Open **Manuscript edits** from the review dashboard. The optional manuscript-edit field on each review sends wording suggestions to this list, including suggestions saved alongside an approval. The agent also checks ordinary review comments for editorial requests when it resumes. A proposed edit quotes the current passage, provides a replacement and links to its claim.
 
 To make the change yourself, copy the proposed replacement. On the local edits page select the suggestions you handled and choose **Clear selected**, or use **Clear all active suggestions**. **Restore selected** brings cleared items back. Clearing is a housekeeping decision and does not certify that a manuscript was revised.

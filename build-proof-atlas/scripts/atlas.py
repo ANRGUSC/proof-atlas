@@ -321,6 +321,9 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
                  "Subproofs checked" if has_parts else "No completed Lean check")
         verification = {"label": label}
         verification["review_url"] = reviews.review_url(cid)
+        for key in ("stronger_result", "author_scope"):
+            if rd[key]:
+                verification[key] = rd[key]
         if rd["approved"]:
             verification.update(approval=reviews.BADGE,approved=True)
         if checked and p.get("hosting", {}).get("lean_ci") == "enabled":
@@ -362,6 +365,10 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
             badge += f' · {esc(rd["issue"])} · {esc(rd["actor"])}: {esc(rd["next"])}'
         if "approval" in verification:
             badge += f' · <a class="approval approved" href="{reviews.review_url(cid)}">{esc(verification["approval"])}</a>'
+        if rd["stronger_result"]:
+            badge += f' · <a href="{reviews.review_url(cid)}#scope-note">Lean proves more</a>'
+        if rd["author_scope"]:
+            badge += f' · <a href="{reviews.review_url(cid)}#author-scope">Author’s scope note</a>'
         if "evidence" in verification:
             badge += f' <a class="verified-badge" href="{esc(verification["url"])}">&#10003; {esc(verification["remote"])}</a>'
             badge += f' · <a href="{esc(verification["evidence"])}">Verification record</a>'

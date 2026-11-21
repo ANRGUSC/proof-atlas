@@ -157,3 +157,19 @@ class StatementApproval(unittest.TestCase):
         apply("request",[first])
         self.assertEqual(edits.inventory(self.root)[1][first]["status"],"Draft requested")
         self.assertTrue(self.packet()["approved"])
+
+    def test_optional_stronger_result_and_reviewer_scope(self):
+        from review_web import render
+        self.compare()
+        p = self.packet()
+        review.decide(self.root,"t",p["token"],"approve","Author",scope_note="I approve the conclusion at zero.")
+        self.compare(stronger_result="The optimizing witness is also unique.")
+        p = self.packet()
+        self.assertTrue(p["approved"])
+        self.assertIn(b"The optimizing witness is also unique.",render(p))
+        self.assertEqual(p["author_scope"],"I approve the conclusion at zero.")
+        with self.assertRaises(ValueError):
+            self.compare("difference",stronger_result="Extra",issue="A case is missing",actor="Proof agent",next="Prove it.")
+        review.decide(self.root,"t",p["token"],"difference","Reader","Please check the endpoint.")
+        self.assertFalse(self.packet()["stronger_result"])
+        self.assertFalse(self.packet()["author_scope"])

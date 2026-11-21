@@ -58,7 +58,12 @@ def render(data,secret=None,notice=""):
                 '<section><h2>What Lean proved</h2><small>Mathematical reading of the audited Lean statement</small>'+para(view["lean_reading"] or "The agent has not supplied a current independent reading.")+
                 para(view["lean_refs"])+'</section></div>')
     body=f'<p>{esc(v["edition"])} · {cid}</p><h1>{esc(data["title"])}</h1>'
-    body+=para(notice)+para(data["assessment"])+analysis_panel(v,data["feedback_open"])+columns(v)
+    body+=para(notice)+para(data["assessment"])
+    if data["stronger_result"]:
+        body+='<aside id="scope-note"><h2>Lean proves more</h2>'+para(data["stronger_result"])+'</aside>'
+    if data["author_scope"]:
+        body+='<aside id="author-scope"><h2>Author’s scope note</h2>'+para(data["author_scope"])+'</aside>'
+    body+=analysis_panel(v,data["feedback_open"])+columns(v)
     if data["approved"]:
         body+=para(BADGE+" · "+data["events"][-1]["by"])
         if data["approved_before_analysis"]:
@@ -79,6 +84,7 @@ def render(data,secret=None,notice=""):
                '<label>Your name<input name="by" autocomplete="name"></label><label>Difference or question (for the proof agent)'
                '<textarea name="comment" rows="2"></textarea></label>'
                '<label>Suggested manuscript edit (optional)<textarea name="paper_edit" rows="2"></textarea></label>'
+               + ('<label>Scope note to display with my approval (optional)<textarea name="scope_note" rows="2"></textarea></label>' if data["ready"] else '') +
                '<p>A suggestion saved with an approval or difference appears in <a href="../edits.html">Manuscript edits</a>.</p><div class="buttons">')
         if data["ready"]:
             body+='<button name="decision" value="approve">Yes, these match</button>'
@@ -92,6 +98,8 @@ def render(data,secret=None,notice=""):
     for e in reversed(data["events"]):
         label=BADGE if e["decision"]=="approve" else "Difference reported"
         body+=(f'<details><summary>{esc(label)} · {esc(e["by"])} · {esc(e["at"])}</summary>'+para(e["comment"])+
+               (para("Author’s scope note · "+e["scope_note"]) if e.get("scope_note") else "")+
+               (para("Lean proves more · "+e["stronger_result_seen"]) if e.get("stronger_result_seen") else "")+
                para(e["view"]["edition"])+analysis_panel(e["view"])+columns(e["view"])+sources(e.get("sources",[]))+'</details>')
     return document(data["title"],body)
 
@@ -168,7 +176,7 @@ def serve(root,open_browser=True,port=0):
                     location=path
                 else:
                     cid=claims()[path]
-                    decide(root,cid,form["token"],form["decision"],form.get("by",""),form.get("comment",""),form.get("paper_edit",""))
+                    decide(root,cid,form["token"],form["decision"],form.get("by",""),form.get("comment",""),form.get("paper_edit",""),form.get("scope_note",""))
                     location="/review.html" if form["decision"]=="skip" else path+"?saved"
                 self.send_response(303)
                 self.send_header("Location",location)

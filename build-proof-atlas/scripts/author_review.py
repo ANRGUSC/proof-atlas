@@ -70,6 +70,9 @@ def packet(root, project, claim, work, audit, comparison, events, checked):
     if "analysis" in comp:
         validate_analysis(comp["analysis"], comp["result"])
         view.update(analysis=comp["analysis"], result=comp["result"])
+    stronger = comp.get("stronger_result", "")
+    if "stronger_result" in comp and (comp["result"] != "match" or not isinstance(stronger,str) or not stronger.strip()):
+        raise ValueError("Use a stronger-result note only for a match and describe the extra conclusion")
     version = digest(view)
     last = events[-1] if events else {}
     resolved = comp.get("resolves", []) if comp.get("resolution") else []
@@ -99,6 +102,8 @@ def packet(root, project, claim, work, audit, comparison, events, checked):
                 checked=checked, approved=bool(approved), disputed=disputed,
                 ready=bool("analysis" in view and comp.get("result")=="match" and not disputed),
                 feedback_open=bool(outstanding), approved_before_analysis=bool(approved and prior_readings),
+                stronger_result=stronger if not disputed else "",
+                author_scope=last.get("scope_note","") if approved else "",
                 assessment={"match":"Automated comparison found no discrepancy","difference":"Difference found",
                             "unsure":"Interpretation unresolved"}.get(comp.get("result"), "Comparison pending"),
                 issue=issue, actor=actor, next=step, resolution=comp.get("resolution",""))
@@ -164,7 +169,7 @@ def project_lock(root):
         yield
 
 
-def decide(root,cid,token,decision,by,comment="",paper_edit=""):
+def decide(root,cid,token,decision,by,comment="",paper_edit="",scope_note=""):
     from atlas import atomic
     if decision not in ("approve","difference","skip"):
         raise ValueError("Unknown decision")
@@ -182,6 +187,10 @@ def decide(root,cid,token,decision,by,comment="",paper_edit=""):
                      at=datetime.now(timezone.utc).isoformat(), view=data["view"], sources=data["sources"])
         if paper_edit.strip():
             event["paper_edit"] = paper_edit.strip()
+        if scope_note.strip():
+            event["scope_note"] = scope_note.strip()
+        if data["stronger_result"]:
+            event["stronger_result_seen"] = data["stronger_result"]
         event["id"] = digest(event)
         path = root/"reviews.json"
         book = read(path, {"version":1,"claims":{}})
@@ -205,6 +214,9 @@ def save_comparison(root,cid,record):
         if result not in ("match","difference","unsure"):
             raise ValueError("Choose match, difference or unsure")
         validate_analysis(record.get("analysis"), result)
+        if "stronger_result" in record and (result!="match" or
+                not isinstance(record["stronger_result"],str) or not record["stronger_result"].strip()):
+            raise ValueError("Use a stronger-result note only for a match and describe the extra conclusion")
         if result != "match" and (record.get("actor") not in ("Proof agent","Author") or
                                   not all(isinstance(record.get(k),str) and record[k].strip() for k in ("issue","next"))):
             raise ValueError("Record the precise issue, next actor and action")
@@ -232,6 +244,10 @@ def terminal(root,labels,by,ask=input):
         if not labels and (data["approved"] or not data["checked"]):
             continue
         print(cid, data["view"]["edition"], data["view"]["excerpt"], sep="\n")
+        if data["stronger_result"]:
+            print("Lean proves more",data["stronger_result"],sep="\n")
+        if data["author_scope"]:
+            print("Author's scope note",data["author_scope"],sep="\n")
         view=data["view"]
         if analysis := view.get("analysis"):
             print("Agent analysis", analysis["summary"], sep="\n")
@@ -254,4 +270,4 @@ def terminal(root,labels,by,ask=input):
         if answer=="!":
             decide(root,cid,data["token"],"difference",by,ask("What differs? "))
         elif answer==cid and data["ready"]:
-            decide(root,cid,data["token"],"approve",by)
+            decide(root,cid,data["token"],"approve",by,scope_note=ask("Optional scope note for this approval (Enter to omit): "))
