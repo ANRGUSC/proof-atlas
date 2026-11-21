@@ -202,6 +202,89 @@ def statement_record(lake, root, env, contract, expected):
     return dict(expected=expected, sha256=digest, constants=constants)
 
 
+# Derives from the expected proposition what an example must show: that its hypotheses can
+# all hold at once. Every binder of the statement's ∀/→ prefix is a hypothesis. A ∀/→ inside
+# the conclusion (a guarded clause, reached through ∧, ∃ and let) adds its own binders, so the
+# guard must hold too. Each such path becomes `∃ x…, H₁ ∧ … ∧ Hₖ`; paths are joined with ∧.
+# A variable the theorem itself chooses (under ∃) enters only when a hypothesis mentions it.
+# Only the expected definition itself is unfolded, so ¬, ≠ and ⊆ stay conclusions.
+HYPOTHESES_QUERY = r'''
+def proofAtlasPath (ys chosen : Array Lean.Expr) : Lean.MetaM Lean.Expr := do
+  let mut binders := #[]
+  let mut facts := #[]
+  for y in ys do
+    let t ← Lean.Meta.inferType y
+    let used ← ys.anyM fun z => return (← Lean.Meta.inferType z).containsFVar y.fvarId!
+    if chosen.contains y then
+      if used then binders := binders.push y
+    else if (← Lean.Meta.isProp t) && !used then facts := facts.push t
+    else binders := binders.push y
+  let mut body := facts.back?.getD (Lean.mkConst ``True)
+  for f in facts.pop.reverse do body := Lean.mkAnd f body
+  for y in binders.reverse do body ← Lean.Meta.mkAppM ``Exists #[← Lean.Meta.mkLambdaFVars #[y] body]
+  return body
+
+partial def proofAtlasPaths (e : Lean.Expr) (xs chosen : Array Lean.Expr) : Lean.MetaM (Array Lean.Expr) := do
+  match e.consumeMData with
+  | .forallE n t b bi =>
+    Lean.Meta.withLocalDecl n bi t fun x => do
+      let found ← proofAtlasPaths (b.instantiate1 x) (xs.push x) chosen
+      if found.isEmpty then return #[← proofAtlasPath (xs.push x) chosen] else return found
+  | .letE _ _ v b _ => proofAtlasPaths (b.instantiate1 v) xs chosen
+  | e =>
+    if e.isAppOfArity ``And 2 then
+      return (← proofAtlasPaths e.appFn!.appArg! xs chosen) ++ (← proofAtlasPaths e.appArg! xs chosen)
+    if e.isAppOfArity ``Exists 2 then
+      if let .lam n t b bi := e.appArg!.consumeMData then
+        return ← Lean.Meta.withLocalDecl n bi t fun x =>
+          proofAtlasPaths (b.instantiate1 x) (xs.push x) (chosen.push x)
+    return #[]
+
+#eval show Lean.MetaM Unit from do
+  let some ci := (← Lean.getEnv).find? (__EXPECTED__ : String).toName | throwError "unknown expected proposition"
+  let some v := ci.value? | throwError "the expected proposition has no definition body"
+  let us ← ci.levelParams.mapM fun _ => Lean.Meta.mkFreshLevelMVar
+  let paths ← proofAtlasPaths (v.instantiateLevelParams ci.levelParams us) #[] #[]
+  let goal := paths.pop.foldr Lean.mkAnd (paths.back?.getD (Lean.mkConst ``True))
+  let w ← Lean.Meta.inferType (← Lean.Meta.mkConstWithFreshMVarLevels (__WITNESS__ : String).toName)
+  let ok ← Lean.Meta.isDefEq w goal
+  IO.println <| "PROOF-ATLAS-HYPOTHESES " ++ (Lean.Json.mkObj [("matches", Lean.toJson ok),
+    ("needed", toString (← Lean.Meta.ppExpr (← Lean.instantiateMVars goal))),
+    ("proved", toString (← Lean.Meta.ppExpr (← Lean.instantiateMVars w)))]).compress
+'''
+
+
+def axiom_report(output, declaration):
+    """The axioms `#print axioms` lists for one declaration, refusing any beyond Lean's standard three."""
+    quoted = re.escape("'"+declaration+"'")
+    reports = re.findall(quoted + r" (?:depends on axioms:\s*\[([^\]]*)\]|does not depend on any axioms)", output)
+    if len(reports) != 1:
+        raise ValueError("Could not identify one axiom report for the requested declaration:\n"+output)
+    axioms = [a.strip() for a in reports[0].split(",") if a.strip()]
+    additional = set(axioms) - {"propext", "Classical.choice", "Quot.sound"}
+    if additional:
+        raise ValueError(f"{declaration} uses additional axioms: "+", ".join(sorted(additional)))
+    return axioms
+
+
+def hypotheses_record(lake, root, env, contract, expected, witness):
+    """Check that `witness` proves the hypotheses of `expected` can all hold, using standard axioms."""
+    program = ("import Lean\n" + (root/contract).read_text(encoding="utf-8-sig") + "\n" +
+               HYPOTHESES_QUERY.replace("__EXPECTED__", json.dumps(expected)).replace("__WITNESS__", json.dumps(witness)) +
+               f"#print axioms {witness}\n")
+    result = subprocess.run([*lake, "env", "lean", "--stdin"], input=program.encode(),
+                            cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    output = result.stdout.decode("utf-8-sig", errors="replace")
+    rows = [json.loads(line.split(" ", 1)[1]) for line in output.splitlines()
+            if line.startswith("PROOF-ATLAS-HYPOTHESES ")]
+    if result.returncode or len(rows) != 1:
+        raise ValueError("Could not check the hypotheses example:\n" + output)
+    if not rows[0]["matches"]:
+        raise ValueError(f"The example {witness} proves\n  {rows[0]['proved']}\nbut the hypotheses of {expected} "
+                         f"need\n  {rows[0]['needed']}\nState the example with that type.")
+    return dict(declaration=witness, proposition=rows[0]["needed"], axioms=axiom_report(output, witness))
+
+
 def inputs(root):
     result = {}
     for directory, children, files in os.walk(root):
@@ -218,7 +301,8 @@ def audit(args):
     contract = (root/args.contract).resolve(strict=True)
     if not contract.is_relative_to(root) or contract.suffix != ".lean":
         raise ValueError("Keep the independent contract in the Lean package")
-    for name in (args.declaration, args.expected, *args.target):
+    witness = getattr(args, "witness", None)
+    for name in (args.declaration, args.expected, *args.target, *([witness] if witness else [])):
         if not re.fullmatch(r"[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*", name):
             raise ValueError("Expected a fully qualified Lean identifier")
     pin = (root/"lean-toolchain").read_text(encoding="utf-8-sig").strip()
@@ -257,14 +341,13 @@ def audit(args):
     output = result.stdout.decode("utf-8-sig", errors="replace")
     if result.returncode or re.search(r"\bwarning:", output, re.I):
         raise ValueError("Lean contract check did not pass cleanly:\n"+output)
-    quoted = re.escape("'"+declaration+"'")
-    reports = re.findall(quoted + r" (?:depends on axioms:\s*\[([^\]]*)\]|does not depend on any axioms)", output)
-    if len(reports) != 1:
-        raise ValueError("Could not identify one axiom report for the requested declaration:\n"+output)
-    axioms = [a.strip() for a in reports[0].split(",") if a.strip()]
-    additional = set(axioms) - {"propext", "Classical.choice", "Quot.sound"}
-    if additional:
-        raise ValueError("Declaration uses additional axioms: "+", ".join(sorted(additional)))
+    axioms = axiom_report(output, declaration)
+    if witness:
+        hypotheses = hypotheses_record(lake, root, env, contract_path, args.expected, witness)
+    else:
+        hypotheses = None
+        print("Warning: no --witness was given, so nothing shows that the hypotheses of the expected "
+              "proposition can hold. See 'Show the hypotheses can hold' in SKILL.md.", file=sys.stderr)
     if statements:
         check_statements(lake, root, env, contract_path, args.expected, statements)
     else:
@@ -287,7 +370,8 @@ def audit(args):
                 expected=args.expected, toolchain=pin, axioms=axioms,
                 targets=args.target, input_scope="module-closure" if scoped is not None else "full-package",
                 checked_inputs=initial, statements=statements, lean_output=output.strip(),
-                **({"statement": statement} if statement else {}))
+                **({"statement": statement} if statement else {}),
+                **({"hypotheses": hypotheses} if hypotheses else {}))
 
 
 if __name__ == "__main__":
@@ -299,6 +383,7 @@ if __name__ == "__main__":
     parser.add_argument("--target", action="append", default=[], help="Build this proof module before checking its independent contract")
     parser.add_argument("--statements", action="append", default=[],
                         help="Directory or file holding the paper's statements and definitions; they may not import proof modules")
+    parser.add_argument("--witness", help="Declaration proving that the hypotheses of the expected proposition can all hold")
     parser.add_argument("--output", type=Path, help="New evidence file to create on success")
     args = parser.parse_args()
     try:
