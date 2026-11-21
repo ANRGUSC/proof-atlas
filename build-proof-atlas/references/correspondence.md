@@ -14,7 +14,7 @@ Write the comparison for an author who understands the mathematics and may have 
 
 Every new comparison record includes an `analysis` object with these fields:
 
-- `summary` gives the verdict in the language of this theorem.
+- `summary` gives the verdict in the language of this theorem. Say explicitly when the checked theorem implies the paper claim and also proves more. For a stronger result, identify the direction of implication, the extra clauses, and the existence or absence of a separately checked paper-facing corollary.
 - `cases` is a nonempty array of objects with four strings: `case`, `paper`, `lean`, and `why`. A single row is enough for a single implication.
 - `scope` says what follows, including any meaningful extra conclusion or missing case.
 - `advice` explains which decision fits the evidence and why. For a conditional recommendation, state the condition the author should check.

@@ -69,6 +69,8 @@ An audit with `--statements` requires the standard package-root source layout an
 
 Start with a claim requested by the author, or one with a tractable prerequisite. Write the intended Lean statement and the definitions it uses in the statement directory before any proof. Record the hypotheses inherited from earlier passages, any stronger or weaker formalization, and which conclusions remain. Keep a subclaim attached to its parent. Maintain the manuscript statement even when a boundary case fails. Continue independent claims while recording questions for the author.
 
+Make the public theorem easy to compare clause by clause with the paper. Preserve its quantifiers, units, endpoints, cases and conclusions in manuscript order where practical. If a stronger lemma simplifies the proof, use it internally and derive a checked corollary with the precise paper statement as the atlas target. For an older atlas whose target is stronger, name the additional conclusions, explain how restriction or projection gives the paper claim, and say whether an exact corollary has been checked. A recommendation to accept coverage must identify that distinction.
+
 Before writing tactics for a multistep theorem, apply this planning prompt:
 
 > What smaller Lean statements would together imply the paper's exact claim? For each, write its hypotheses and conclusion, name the previously proved facts it needs, and identify the final Lean step that will assemble the results. Which independent lemmas can be developed or checked in parallel, and which need a prerequisite first?
