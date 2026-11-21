@@ -59,6 +59,9 @@ class DashboardCompletion(unittest.TestCase):
             self.assertIn(complete, current)
             self.assertIn("Lean checked", current)
             self.assertNotIn("Machine verified on GitHub", current)
+            # The homepage says what the badges cover; the readable views say they are unchecked.
+            self.assertIn("What the badges mean", (root / "dist/index.html").read_text(encoding="utf-8"))
+            self.assertIn("Explanation, not machine-checked", (root / "dist/explorer.js").read_text(encoding="utf-8"))
 
             project["hosting"] = {"repository": "https://github.com/example/paper", "lean_ci": "enabled"}
             revision = "a" * 40
