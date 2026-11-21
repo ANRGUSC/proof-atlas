@@ -75,6 +75,8 @@ function proofView(c,view) {
     const a=link(label,route(c.id,id)); if(id===view) a.setAttribute("aria-current","page"); tabs.append(a);
   }
   pane.append(tabs);
+  // Only the Lean view is tied to the checked proof; the readable views are written separately.
+  if(view==="english" || view==="lamport") pane.append(el("p","Explanation, not machine-checked. The Lean view shows what Lean checked.","unchecked-note"));
   if(view==="english") {
     pane.append(el("h3","What the claim says"),rich(c.summary || "An English summary is pending. The manuscript view contains the source statement."));
     pane.append(el("h3",c.kind==="conjecture"?"Open question":"High-level proof sketch"),rich(c.sketch || (c.kind==="conjecture"?"The manuscript presents this as a conjecture.":"A proof sketch has yet to be recorded.")));
