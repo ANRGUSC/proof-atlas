@@ -1,4 +1,6 @@
+from contextlib import redirect_stdout
 import hashlib
+import io
 import json
 from pathlib import Path
 import sys
@@ -45,7 +47,14 @@ class DashboardCompletion(unittest.TestCase):
                 return (root / "dist/progress.html").read_text(encoding="utf-8")
 
             complete = "Paper-wide proof work complete"
-            current = dashboard()
+            with redirect_stdout(io.StringIO()) as log:
+                current = dashboard()
+            self.assertIn("audited without --statements", log.getvalue())
+            audit["statements"] = ["Statements"]
+            (root / "audit.json").write_text(json.dumps(audit), encoding="utf-8")
+            with redirect_stdout(io.StringIO()) as log:
+                current = dashboard()
+            self.assertNotIn("audited without --statements", log.getvalue())
             self.assertIn("1 of 1 stated results closed", current)
             self.assertIn(complete, current)
             self.assertIn("Lean checked", current)
