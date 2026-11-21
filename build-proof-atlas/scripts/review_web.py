@@ -42,7 +42,9 @@ def render(data,secret=None,notice=""):
         body+=para(BADGE+" · "+data["events"][-1]["by"])
     elif any(e["decision"]=="approve" for e in data["events"]):
         body+=para("The earlier approval is historical. A fresh review is available after the current comparison is ready.")
-    body+=('<p><a href="../manuscript.pdf">Paper PDF</a> · <a href="../proofs/index.html#/claim/'+quote(data["id"],safe="")+
+    page = data.get("page")
+    pdf = f"../manuscript.pdf#page={page}" if type(page) is int and page > 0 else "../manuscript.pdf"
+    body+=(f'<p><a href="{pdf}">Paper PDF</a> · <a href="../proofs/index.html#/claim/'+quote(data["id"],safe="")+
            '?view=lean">Lean source and verification evidence</a></p>')
     if data["sources"]:
         body+='<details><summary>Inspect the exact Lean statement and definitions</summary>'+sources(data["sources"])+'</details>'

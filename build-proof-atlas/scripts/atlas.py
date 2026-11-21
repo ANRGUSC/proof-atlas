@@ -293,6 +293,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
             status = "awaiting recheck"
         checked = status == "closed"
         rd = reviews.packet(root,p,c,w,audit if checked else None,comparisons.get(cid),reviews.history(root,cid),checked)
+        rd["page"] = entry.get("page")
         rd["sources"] = reviews.exact_sources(root,w,audit) if checked else []
         review_entries.append(rd)
         atomic(output/reviews.review_url(cid),review_web.render(rd))

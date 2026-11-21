@@ -101,7 +101,7 @@ def exact_sources(root, work, audit):
 
 
 def get_packet(root, cid):
-    from atlas import current_audit, manuscript_claims, read_source
+    from atlas import current_audit, manuscript_claims, read_source, local
     project = read(root/"project.json", {})
     read_source(root,project["pdf"])
     claim = next((c for c in manuscript_claims(root,project) if c["id"]==cid), None)
@@ -118,6 +118,8 @@ def get_packet(root, cid):
             pass
     comp = read(root/"comparisons.json", {}).get(cid)
     data = packet(root,project,claim,work,audit,comp,history(root,cid),checked)
+    reader = read(local(root,project["reader"]), {}) if project.get("reader") else {}
+    data["page"] = work.get("page") or reader.get("claims",{}).get(cid,{}).get("page")
     data["sources"] = exact_sources(root,work,audit)
     return data
 
