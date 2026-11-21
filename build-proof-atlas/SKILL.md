@@ -59,6 +59,8 @@ For an executable evidence check, define the intended proposition in the stateme
 
 `--statements` accepts a directory or a single file and may be repeated. An atlas audited before this check keeps building, and the build warns about each closure audited without `--statements`. To migrate one, run the audit with `--statements` naming the files that hold its statement and definitions, then move whatever definitions the audit reports into those files. Naming a file that mixes definitions and proofs also passes, but it makes those proofs part of the statement. Rerun the audit and update the closure with the new receipt.
 
+An audit with `--statements` requires the standard package-root source layout and module paths the auditor can confirm with Lake. A custom library `srcDir`, for example, stops the audit with `Cannot verify statement independence`. Use the supported layout to obtain an independence receipt. Legacy audits can still record a full-package Lean check for custom layouts.
+
 Start with a claim requested by the author, or one with a tractable prerequisite. Write the intended Lean statement and the definitions it uses in the statement directory before any proof. Record the hypotheses inherited from earlier passages, any stronger or weaker formalization, and which conclusions remain. Keep a subclaim attached to its parent. Maintain the manuscript statement even when a boundary case fails. Continue independent claims while recording questions for the author.
 
 Before writing tactics for a multistep theorem, apply this planning prompt:

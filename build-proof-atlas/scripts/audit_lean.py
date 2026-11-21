@@ -74,7 +74,7 @@ def check_statements(lake, root, env, contract, expected, statements):
     result = subprocess.run([*lake, "env", "lean", "--stdin"], input=query.encode(), cwd=root, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     output = result.stdout.decode("utf-8-sig", errors="replace")
-    found = re.findall(r"^PROOF-ATLAS-MODULE (none|\(some (\S+)\))$", output, re.M)
+    found = re.findall(r"^PROOF-ATLAS-MODULE (none|\(some (\S+)\))\r?$", output, re.M)
     if result.returncode or len(found) != 1:
         raise ValueError("Could not locate the expected proposition:\n" + output)
     module = found[0][1]
@@ -166,13 +166,20 @@ def audit(args):
     contract_path = contract.relative_to(root).as_posix()
     scoped = None
     build_targets = list(args.target)
-    if args.target:
+    statements = list(getattr(args, "statements", None) or [])
+    if build_targets or statements:
         try:
-            scoped, contract_targets = module_inputs(lake, root, env, args.target, contract_path)
+            closure, contract_targets = module_inputs(lake, root, env, args.target, contract_path)
         except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
+            if statements:
+                raise ValueError(f"Cannot verify statement independence: {exc}") from exc
             print(f"Using full-package source hashes: {exc}", file=sys.stderr)
         else:
-            build_targets += [t for t in contract_targets if t[1:] not in args.target]
+            # A default build still hashes the whole package. Statement checks
+            # need a verified module layout regardless of the build target.
+            if build_targets:
+                scoped = closure
+                build_targets += [t for t in contract_targets if t[1:] not in args.target]
     initial = inputs(root) if scoped is None else hash_paths(root, scoped)
     if contract_path not in initial or pin != (root/"lean-toolchain").read_text(encoding="utf-8-sig").strip():
         raise ValueError("Missing contract or toolchain pin changed during audit setup")
@@ -194,7 +201,6 @@ def audit(args):
     additional = set(axioms) - {"propext", "Classical.choice", "Quot.sound"}
     if additional:
         raise ValueError("Declaration uses additional axioms: "+", ".join(sorted(additional)))
-    statements = list(getattr(args, "statements", None) or [])
     if statements:
         check_statements(lake, root, env, contract_path, args.expected, statements)
     else:

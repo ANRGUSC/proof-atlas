@@ -99,14 +99,15 @@ class AuditClosure(unittest.TestCase):
                 audit(expected="ContractStatement")
             # So is a statement module importing a proof module, directly or through another statement module.
             main = root/"Statements/Main.lean"
-            main.write_text("import Statements.Defs\nimport Proofs.Helper\ndef Statement : Prop := ∀ n, helperRate n > n\n")
+            main.write_text("import Statements.Defs\nimport Proofs.Helper\ndef Statement : Prop := ∀ n, helperRate n > n\n",
+                            encoding="utf-8")
             with self.assertRaisesRegex(ValueError, r"Statements/Main\.lean imports Proofs\.Helper \(Proofs/Helper\.lean\)"):
                 audit()
-            main.write_text(sources["Statements/Main.lean"])
+            main.write_text(sources["Statements/Main.lean"], encoding="utf-8")
             defs = root/"Statements/Defs.lean"
             defs.write_text("import Proofs.Helper\ndef rate (n : Nat) : Nat := helperRate n\n")
             (root/"Proofs/Helper.lean").write_text("def helperRate (n : Nat) : Nat := n + 1\n"
-                                                   "def ProofStatement : Prop := ∀ n, helperRate n > n\n")
+                                                   "def ProofStatement : Prop := ∀ n, helperRate n > n\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, r"Statements/Defs\.lean imports Proofs\.Helper"):
                 audit()
             # Without a statement path the old layout still passes, with a warning.
@@ -114,6 +115,37 @@ class AuditClosure(unittest.TestCase):
                 self.assertEqual(audit(statements=())["statements"], [])
                 err.seek(0)
                 self.assertIn("no --statements path was given", err.read())
+
+    def test_statement_check_requires_verified_source_layout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pin = os.environ["ELAN_TOOLCHAIN"]
+            (root/"lean-toolchain").write_text(pin)
+            (root/"lakefile.toml").write_text(
+                'name = "Example"\ndefaultTargets = ["Statements"]\n'
+                '[[lean_lib]]\nname = "Statements"\n'
+                '[[lean_lib]]\nname = "Proofs"\nsrcDir = "implementation"\n')
+            (root/"Statements").mkdir()
+            (root/"implementation/Proofs").mkdir(parents=True)
+            (root/"implementation/Proofs/Helper.lean").write_text("def quantity := 2\n")
+            (root/"Statements/Main.lean").write_text(
+                "import Proofs.Helper\ndef Statement : Prop := quantity = 2\n")
+            (root/"Statements.lean").write_text("import Statements.Main\n")
+            (root/"Contract.lean").write_text("import Statements.Main\ntheorem claim : Statement := rfl\n")
+            env = os.environ.copy()
+            lake = audit_lean.select_lake(root, pin, env, sys.stderr, offline=True)
+            subprocess.run([*lake, "update"], cwd=root, env=env, check=True)
+            args = SimpleNamespace(package=root, contract="Contract.lean", expected="Statement",
+                                   declaration="claim", target=["Statements.Main"], statements=[])
+            receipt = audit_lean.audit(args)
+            self.assertEqual(receipt["input_scope"], "full-package")
+            self.assertIn("implementation/Proofs/Helper.lean", receipt["checked_inputs"])
+            args.statements = ["Statements"]
+            for targets in (["Statements.Main"], []):
+                with self.subTest(targets=targets):
+                    args.target = targets
+                    with self.assertRaisesRegex(ValueError, "Cannot verify statement independence: Custom Lean library"):
+                        audit_lean.audit(args)
 
 
 if __name__ == "__main__":
