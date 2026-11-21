@@ -46,4 +46,6 @@ A changed formal statement, relevant project definition, toolchain pin, paper so
 
 ## Why is a claim waiting?
 
+“Proof agent” names the owner of the next action. An active, authorized coding session investigates the finding, integrates a successful repair, rechecks the release declaration and follows it to the agreed destination. You do not need to resubmit the same question or approve a scratch result. If the session is closed, its saved tasks are picked up when you resume. The agent reports a specific blocker or author decision when one is needed. The dashboard and linked GitHub run show actual verification activity.
+
 The queue gives the next actor and action. Proof work can proceed with review skipped. Older atlases keep their machine evidence and counts. To enable optional review for an old claim, ask the agent to refresh its audit with the current skill and prepare the two independent readings. If you only want to read the atlas, no migration is needed.

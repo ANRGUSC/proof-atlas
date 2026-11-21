@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -173,3 +174,43 @@ class StatementApproval(unittest.TestCase):
         review.decide(self.root,"t",p["token"],"difference","Reader","Please check the endpoint.")
         self.assertFalse(self.packet()["stronger_result"])
         self.assertFalse(self.packet()["author_scope"])
+
+    def test_review_work_follows_feedback_without_requiring_approval(self):
+        self.compare("unsure",issue="Boundary omitted",actor="Proof agent",next="Check the endpoint")
+        (self.root/"scratch.lean").write_text("-- A local experiment")
+        report=atlas.review_work(self.root)
+        self.assertEqual(report["agent_tasks"][0]["next"],"Check the endpoint")
+        self.compare("unsure",issue="Two intended domains",actor="Author",next="Which domain did you intend?")
+        self.assertFalse(atlas.review_work(self.root)["agent_tasks"])
+        self.assertTrue(atlas.review_work(self.root)["author_questions"])
+        self.compare(resolution="Covered both domains.")
+        review.decide(self.root,"t",self.packet()["token"],"difference","Reader","What about zero?")
+        self.assertIn("zero",atlas.review_work(self.root)["agent_tasks"][0]["issue"])
+        self.compare(resolves=[self.packet()["events"][-1]["id"]],resolution="Checked the zero case.")
+        self.assertFalse(self.packet()["approved"])
+        self.assertFalse(atlas.review_work(self.root)["agent_tasks"])
+
+    def test_release_check_requires_committed_comparison_and_current_ci(self):
+        self.project["hosting"] = {"lean_ci":"enabled","repository":"https://github.com/example/atlas"}
+        (self.root/"project.json").write_text(json.dumps(self.project),encoding="utf8")
+        self.compare()
+        def git(*args):
+            return subprocess.check_output(["git","-c","user.name=Test","-c","user.email=test@example.com",*args],
+                                           cwd=self.root,text=True).strip()
+        git("init","-q")
+        git("add",".")
+        git("commit","-qm","Checked release")
+        receipt_path = self.root/"remote.json"
+        def status():
+            return atlas.review_work(self.root,require_ci=True,ci_receipt=receipt_path)
+        self.assertEqual(status()["ci_pending"],["t"])
+        record = {"repository":"example/atlas","commit":git("rev-parse","HEAD"),"run_id":42,"attempt":1,
+                  "claims":{"t":{"audit_sha256":hashlib.sha256((self.root/"audit.json").read_bytes()).hexdigest(),
+                                 "statement_sha256":self.packet()["view"]["bindings"]["statement"]}}}
+        receipt_path.write_text(json.dumps(record))
+        self.assertFalse(status()["ci_pending"])
+        self.compare(lean_reading="An updated reading that is still only local.")
+        self.assertTrue(status()["uncommitted_delivery_files"])
+        git("add","comparisons.json")
+        git("commit","-qm","Updated review")
+        self.assertEqual(status()["ci_pending"],["t"])

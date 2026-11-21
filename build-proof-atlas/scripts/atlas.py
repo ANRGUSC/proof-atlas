@@ -222,6 +222,53 @@ def build_local(root):
     return build(root, **options)
 
 
+def review_work(root, labels=(), *, require_ci=False, ci_receipt=None):
+    """List actionable review findings. Optional approvals are never obligations."""
+    import subprocess
+    project = reviews.read(root/"project.json", {})
+    claims = {c["id"]: c for c in manuscript_claims(root, project)}
+    if set(labels) - claims.keys():
+        raise ValueError("Unknown review-work claim")
+    selected = list(dict.fromkeys(labels or claims))
+    report = {"scope": project.get("proof_work"), "agent_tasks": [], "author_questions": [],
+              "uncommitted_delivery_files": [], "ci_pending": []}
+    ci = None
+    if require_ci:
+        if project.get("hosting", {}).get("lean_ci") != "enabled":
+            raise ValueError("--require-ci requires GitHub verification enabled for this atlas")
+        git = ["git","-c","safe.directory="+root.as_posix()]
+        sha = subprocess.check_output([*git,"rev-parse","HEAD"],cwd=root,text=True).strip()
+        paths = {"project.json","comparisons.json"}
+        for cid in selected:
+            work = project.get("work",{}).get(cid,{})
+            if work.get("status")=="closed":
+                paths.update([work["closure"]["audit"],work["run_log"]])
+        changes = subprocess.check_output([*git,"status","--porcelain","--untracked-files=all","--",*sorted(paths)],
+                                          cwd=root,text=True)
+        report["uncommitted_delivery_files"] = changes.splitlines()
+        path = Path(ci_receipt or root/"dist/logs/lean-verification.json")
+        ci = github_verification(project, path, sha) if path.is_file() else None
+        report["commit"] = sha
+    for cid in selected:
+        work = project.get("work", {}).get(cid, {})
+        packet = reviews.get_packet(root,cid)
+        if packet["disputed"] or work.get("status")=="closed" and packet["actor"]=="Proof agent":
+            key = "author_questions" if packet["actor"]=="Author" else "agent_tasks"
+            report[key].append(dict(claim=cid, issue=packet["issue"], next=packet["next"]))
+        if require_ci and work.get("status")=="closed":
+            evidence = (ci or {}).get("claims", {}).get(cid, {})
+            digest = hashlib.sha256(local(root,work["closure"]["audit"]).read_bytes()).hexdigest()
+            if not packet["checked"] or evidence.get("audit_sha256")!=digest or (
+                    packet["view"]["bindings"]["statement"] and
+                    evidence.get("statement_sha256")!=packet["view"]["bindings"]["statement"]):
+                report["ci_pending"].append(cid)
+    book, edits = manuscript_edits.inventory(root)
+    for key,item in edits.items():
+        if item["claim"] in selected and key not in book.get("cleared",{}) and item.get("status")=="Draft requested":
+            report["agent_tasks"].append(dict(claim=item["claim"], edit=key, next="Prepare the requested manuscript draft."))
+    return report
+
+
 def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     p = json.loads((root / "project.json").read_text(encoding="utf-8-sig"))
     ci = github_verification(p, ci_receipt, commit)
@@ -468,7 +515,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["build", "approve", "review", "review-inputs","compare"])
+    parser.add_argument("operation", choices=["build", "approve", "review", "review-inputs","compare","review-work"])
     parser.add_argument("project", type=Path)
     parser.add_argument("claims", nargs="*", help="approve: claim labels (default: every closed claim awaiting approval)")
     parser.add_argument("--by", help="approve: the author approving the statements. Only the author runs approve")
@@ -479,9 +526,16 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--side",choices=["paper","lean"],help="Limit the independent reader to one source")
     parser.add_argument("--readings",type=Path,help="Agent comparison record for one claim")
+    parser.add_argument("--check",action="store_true",help="review-work: exit nonzero for pending agent tasks or requested CI evidence")
+    parser.add_argument("--require-ci",action="store_true",help="review-work: verify receipt coverage for the current checkout commit")
     args = parser.parse_args()
     try:
-        if args.operation == "approve":
+        if args.operation == "review-work":
+            report = review_work(args.project.resolve(),args.claims,require_ci=args.require_ci,ci_receipt=args.ci_receipt)
+            print(json.dumps(report,ensure_ascii=False,indent=2))
+            if args.check and (report["agent_tasks"] or report["uncommitted_delivery_files"] or report["ci_pending"]):
+                sys.exit(1)
+        elif args.operation == "approve":
             reviews.terminal(args.project.resolve(), args.claims, args.by or "")
             build_local(args.project.resolve())
         elif args.operation == "review":

@@ -2,7 +2,7 @@
 name: build-proof-atlas
 description: Build or resume a source-linked proof atlas from a theory paper, open a four-view Proof Atlas explorer and a live progress dashboard, and expose the distinction between paper claims, proof attempts and checked results.
 metadata:
-  version: "0.9.0"
+  version: "0.10.0"
 ---
 
 # Build a Proof Atlas
@@ -16,6 +16,14 @@ Record the edition's canonical HTTP(S) URL in `project.json` as `publication` an
 On the first build, open the explorer and dashboard and give their full URLs or absolute paths, the current claim, the authorized stopping point, and the phrase “Open the local review dashboard for this paper.” Point readers to **How to use this atlas**. Start or reuse the local review server whenever requested, including during proof work or on a later day.
 
 Read new review feedback at checkpoints and on resume. For every paper claim, run the [independent correspondence workflow](references/correspondence.md) at statement preparation and again on checked evidence. Automatically write the author-facing analysis when each claim is checked and backfill missing analyses when resuming an older atlas. Show why the cases agree or differ, identify the scope, and recommend approval, a specific correction, or a clarification. Resolve discrepancies and continue the authorized scope. The dashboard reports formal checks, optional author review, outstanding differences and the next actor separately. A known mismatch reopens the paper obligation while preserving evidence for the actual formal result. Human review is optional and never gates an otherwise completed proof run. Only a human records author decisions. For review, migration or publication use the [author guide](references/author-guide.md).
+
+### Carry review findings through to delivery
+
+When reviewing or resuming, run `python <skill>/scripts/atlas.py review-work PROJECT`. Do this again after feedback, at checkpoints and before handing back control. Act on proof-agent tasks within the existing authorization during the same session. A review request can uncover a repair covered by an earlier paper-wide or single-claim authorization. Carry it out without asking the reviewer to file the finding again. Respect requests for assessment only and any explicit pause. The owner field assigns responsibility; report a check as running only when a real process or workflow is running.
+
+A successful scratch proof is an intermediate result. Integrate it into the tracked Lean package, connect the paper claim to the declaration that includes the fix, refresh its audit and affected dependent audits, and repeat the correspondence comparison. Record the resolution against the original feedback IDs. For authorized hosting, commit and push the scoped repair, wait for enabled CI and Pages, then open the deployed claim and compare its evidence with that commit. Keep local-only projects local. The author alone can approve correspondence or decide a genuine change in the intended mathematics.
+
+Before declaring completion run `atlas.py review-work PROJECT [CLAIM ...] --check` for the authorized scope. For a GitHub-verified release add `--require-ci --ci-receipt PATH` using the downloaded receipt for the published commit. Check the live page separately. Continue on open agent work or missing evidence. If blocked, record the issue, owner, last verified stage and concrete next action and tell the author what remains. Name any actual author questions separately from optional approvals. A stopped session saves the queue for resumption; the static website cannot launch a coding agent.
 
 ## Start a project
 

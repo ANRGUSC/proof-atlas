@@ -108,7 +108,9 @@ def queue(entries):
     from atlas import esc
     rows="".join(f'<li><a href="{review_url(d["id"])}">{esc(d["title"])}</a><br>'
                  f'{esc(BADGE if d["approved"] else d["assessment"])} · {esc(d["actor"])}: {esc(d["next"])}</li>' for d in entries)
-    return document("Author review",'<h1>Author review</h1><p>Compare the paper and the formal statement. Human review is optional.</p><ol>'+rows+'</ol>',"./")
+    return document("Author review",'<h1>Author review</h1><p>Compare the paper and the formal statement. Human review is optional.</p>'
+                    '<p>Each next action names its owner. An active coding agent handles proof repairs during authorized work. '
+                    'Submitting feedback saves it for that session or the next one. See the <a href="progress.html">dashboard</a> for reported activity.</p><ol>'+rows+'</ol>',"./")
 
 
 def serve(root,open_browser=True,port=0):
