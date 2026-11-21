@@ -51,10 +51,11 @@ function relations(c, reverse=false) {
 function proofView(c,view) {
   pane.append(el("small",c.reference),el("h2",c.title));
   const v=c.verification;
+  if(v.review_url) pane.append(link("Review this claim",v.review_url,"graph-link"));
   if(v.approval){
     // Two separate claims: Lean proved the formal statement; the author approved it as the paper's.
     const marks=el("div",null,"lean-checks");
-    marks.append(el("span","✓ "+v.label,"status"),el("span",(v.approved?"✓ ":"")+v.approval,v.approved?"approval approved":"approval"));
+    marks.append(el("span","✓ "+v.label,"status"),link(v.approval,v.review_url,"approval approved"));
     pane.append(marks);
   }
   if(v.evidence){

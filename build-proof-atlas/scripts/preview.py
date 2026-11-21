@@ -8,11 +8,11 @@ from pathlib import Path
 import threading
 import webbrowser
 
-from atlas import atomic, build, local
+from atlas import atomic, build_local, local
 
 
 def inputs(root):
-    paths = {root / "project.json", root / "approvals.json"}
+    paths = {root / "project.json", root / "reviews.json", root / "comparisons.json"}
     p = json.loads((root / "project.json").read_text(encoding="utf-8-sig"))
     paths.update(local(root, src["path"]) for src in [p["pdf"], *p["tex"]])
     if figure := p.get("folio", {}).get("figure"):
@@ -44,7 +44,7 @@ def watch(root, stop, last):
         try:
             current = inputs(root)
             if current != last or error:
-                build(root)
+                build_local(root)
                 last = current
                 error = None
                 atomic(status, b'{}')
@@ -69,7 +69,7 @@ def main():
     args = parser.parse_args()
     root = args.project.resolve()
     initial = inputs(root)
-    build(root)
+    build_local(root)
     with ThreadingHTTPServer(("127.0.0.1", args.port), partial(Handler, directory=str(root / "dist"))) as server:
         base = f"http://127.0.0.1:{server.server_port}/"
         print(f"Proof Atlas: {base}proofs/index.html\nDashboard: {base}progress.html", flush=True)
