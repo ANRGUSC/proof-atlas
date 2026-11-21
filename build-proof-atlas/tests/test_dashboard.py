@@ -50,11 +50,16 @@ class DashboardCompletion(unittest.TestCase):
             with redirect_stdout(io.StringIO()) as log:
                 current = dashboard()
             self.assertIn("audited without --statements", log.getvalue())
+            self.assertIn("no checked example shows the hypotheses can hold for these closures: t", log.getvalue())
+            self.assertIn(atlas.NO_EXAMPLE, current)
             audit["statements"] = ["Statements"]
+            audit["hypotheses"] = {"declaration": "holds", "proposition": "True", "axioms": []}
             (root / "audit.json").write_text(json.dumps(audit), encoding="utf-8")
             with redirect_stdout(io.StringIO()) as log:
                 current = dashboard()
             self.assertNotIn("audited without --statements", log.getvalue())
+            self.assertNotIn("hypotheses can hold", log.getvalue())
+            self.assertNotIn(atlas.NO_EXAMPLE, current)
             self.assertIn("1 of 1 stated results closed", current)
             self.assertIn(complete, current)
             self.assertIn("Lean checked", current)
@@ -66,7 +71,8 @@ class DashboardCompletion(unittest.TestCase):
             project["hosting"] = {"repository": "https://github.com/example/paper", "lean_ci": "enabled"}
             revision = "a" * 40
             record = {"repository": "example/paper", "commit": revision, "run_id": 123, "attempt": 2,
-                      "claims": {"t": dict(audit, audit_sha256=hashlib.sha256((root / "audit.json").read_bytes()).hexdigest())}}
+                      "claims": {"t": dict(audit, audit_sha256=hashlib.sha256((root / "audit.json").read_bytes()).hexdigest(),
+                                           hypotheses="True")}}
             path = root / "remote.json"
             path.write_text(json.dumps(record), encoding="utf8")
             options = dict(ci_receipt=path, commit=revision, artifact_id=456)
@@ -76,6 +82,10 @@ class DashboardCompletion(unittest.TestCase):
             self.assertIn("example/paper/actions/runs/123/artifacts/456", verified)
             self.assertEqual((root / "dist/logs/lean-verification.json").read_bytes(), path.read_bytes())
             self.assertNotIn("Machine verified on GitHub", dashboard(ci_receipt=path, commit="b"*40))
+            # GitHub must have checked the same hypotheses example.
+            record["claims"]["t"]["hypotheses"] = "∃ n, n = n"
+            path.write_text(json.dumps(record), encoding="utf8")
+            self.assertNotIn("Machine verified on GitHub", dashboard(**options))
             record["claims"]["t"]["audit_sha256"] = "0"*64
             path.write_text(json.dumps(record), encoding="utf8")
             self.assertNotIn("Machine verified on GitHub", dashboard(**options))
