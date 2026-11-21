@@ -58,9 +58,13 @@ def verify(root):
             checked = audit(SimpleNamespace(package=package, contract=prior["contract"], target=targets,
                                             expected=prior["expected"], declaration=prior["declaration"],
                                             statements=prior.get("statements", [])))
+            fingerprint = checked.get("statement", {}).get("sha256")
+            if prior.get("statement") and fingerprint != prior["statement"]["sha256"]:
+                raise ValueError(f"{label}: statement fingerprint differs from the local receipt")
             result["claims"][label] = dict(audit_sha256=digest, declaration=checked["declaration"],
                                             expected=checked["expected"], axioms=checked["axioms"],
-                                            toolchain=checked["toolchain"])
+                                            toolchain=checked["toolchain"],
+                                            statement_sha256=fingerprint)
     return result
 
 

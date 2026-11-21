@@ -1,4 +1,6 @@
 """Build a local, read-only view of an author's checkpoint records (Python 3.9+)."""
+import author_review as reviews
+import review_web
 import argparse
 import hashlib
 import html
@@ -8,6 +10,7 @@ import re
 import shutil
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -94,7 +97,7 @@ def masthead(project, first):
     return (f'<header class="mast"><a class="wordmark" href="index.html">Proof Atlas<span>.</span></a>'
             f'<nav aria-label="Project"><a data-nav="home" href="index.html">Overview</a>'
             f'<a data-nav="reader" href="{claim}">Claim reader</a><a data-nav="graph" id="graph-nav" href="{graph}">Dependency graph</a>'
-            '<a data-nav="progress" href="progress.html">Dashboard</a></nav>'
+            '<a data-nav="progress" href="progress.html">Dashboard</a> <a href="review.html">Author review</a></nav>'
             '<details id="about-atlas" class="citation"><summary>Paper &amp; citation</summary><div>'
             f'<h2>About this atlas</h2><p>{paper_citation(project)}</p>'
             f'<p>{esc(project.get("paper_overview", ""))}</p><p><a href="manuscript.pdf">Manuscript PDF</a></p>'
@@ -102,7 +105,7 @@ def masthead(project, first):
             f'<a href="{claim}?view=paper">Paper</a> opens the manuscript. <a href="{claim}?view=lamport">Lamport proof</a> '
             f'breaks the argument into steps. <a href="{claim}?view=lean">Lean</a> shows the formal sources and check records.</p>'
             f'<p>The <a href="{graph}">dependency graph</a> points from prerequisite to result. Whole paper includes isolated claims. '
-            'The <a href="progress.html">progress dashboard</a> tracks active work, checked claims, and verification evidence.</p>'
+            'The <a href="progress.html">progress dashboard</a> tracks active work, checked claims, and verification evidence.</p><a href="guide.html">How to use this atlas</a>'
             '</div></details></header>')
 
 
@@ -175,14 +178,58 @@ def github_verification(project, receipt_path, commit):
     return data
 
 
+def manuscript_claims(root, p):
+    claims = []
+    for source in p["tex"]:
+        claims.extend(inventory(read_source(root, source).decode("utf-8-sig"), source["path"], p["environments"]))
+    return claims
+
+
+def current_audit(root, cid, w):
+    """The closure's receipt, provided the audited sources are unchanged."""
+    if w.get("status") != "closed":
+        raise ValueError(f"{cid}: only a closed claim with a Lean audit can be approved")
+    audit = json.loads(local(root, w["closure"]["audit"]).read_bytes())
+    for path, digest in w.get("checked_inputs", {}).items():
+        if not local(root, path).is_file() or hashlib.sha256(local(root, path).read_bytes()).hexdigest() != digest:
+            raise ValueError(f"{cid}: {path} changed since the Lean check; recheck the claim first")
+    closure = w["closure"]
+    expected = {(Path(closure["package"])/name).as_posix(): h for name,h in audit["checked_inputs"].items()}
+    if (not expected or expected != w.get("checked_inputs") or
+        any(audit[k] != closure[k] for k in ("expected","declaration")) or
+        set(audit["axioms"]) - {"propext","Classical.choice","Quot.sound"}):
+        raise ValueError("Inconsistent audit receipt")
+    return audit
+
+
+def build_local(root):
+    """Keep published evidence during local review when it matches the checkout."""
+    import subprocess
+    receipt = root/"dist/logs/lean-verification.json"
+    options = {}
+    if receipt.is_file():
+        try:
+            data = json.loads(receipt.read_bytes())
+            proc = subprocess.run(["git", "-c", "safe.directory="+root.as_posix(), "rev-parse", "HEAD"],
+                                  cwd=root, capture_output=True, text=True)
+            if proc.returncode == 0 and proc.stdout.strip() == data.get("commit"):
+                previous = reviews.read(root/"dist/checkpoint.json", {})
+                artifact = previous.get("artifact_id") if previous.get("evidence_commit")==data["commit"] else None
+                options = dict(ci_receipt=receipt, commit=data["commit"], artifact_id=artifact)
+        except (OSError, ValueError):
+            pass
+    return build(root, **options)
+
+
 def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     p = json.loads((root / "project.json").read_text(encoding="utf-8-sig"))
     ci = github_verification(p, ci_receipt, commit)
     if p["schema_version"] != 1 or not p["environments"]:
         raise ValueError("project.json: expected schema version 1 and theorem environments")
-    claims = []
-    for source in p["tex"]:
-        claims.extend(inventory(read_source(root, source).decode("utf-8-sig"), source["path"], p["environments"]))
+    claims = manuscript_claims(root, p)
+    comparisons = reviews.read(root/"comparisons.json", {})
+    review_entries = []
+    (root/"dist"/"review").mkdir(parents=True,exist_ok=True)
     by_id = {c["id"]: c for c in claims}
     work = p.get("work", {})
     if len(by_id) != len(claims):
@@ -244,8 +291,14 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
             entry["scope"] = stale[cid] + ". The linked log is historical."
             entry["summary"] = m.get("summary", "The paper claim is awaiting a fresh Lean check.")
             status = "awaiting recheck"
-        entry["status"] = status
-        if c["kind"] != "conjecture" and status == "closed":
+        checked = status == "closed"
+        rd = reviews.packet(root,p,c,w,audit if checked else None,comparisons.get(cid),reviews.history(root,cid),checked)
+        rd["page"] = entry.get("page")
+        rd["sources"] = reviews.exact_sources(root,w,audit) if checked else []
+        review_entries.append(rd)
+        atomic(output/reviews.review_url(cid),review_web.render(rd))
+        entry["status"] = "correspondence under review" if rd["disputed"] else status
+        if c["kind"] != "conjecture" and checked and not rd["disputed"]:
             closed_results += 1
         entry.setdefault("reference", c["kind"].title())
         subproofs = []
@@ -266,12 +319,16 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
                  "Lean checked" if checked else "Awaiting Lean recheck" if changed else
                  "Subproofs checked" if has_parts else "No completed Lean check")
         verification = {"label": label}
+        verification["review_url"] = reviews.review_url(cid)
+        if rd["approved"]:
+            verification.update(approval=reviews.BADGE,approved=True)
         if checked and p.get("hosting", {}).get("lean_ci") == "enabled":
             verification["remote"] = "No GitHub verification for this revision"
             verification["url"] = p["hosting"]["repository"] + "/actions/workflows/verify-lean.yml"
             record = ci["claims"].get(cid) if ci else None
             if (record and record.get("audit_sha256") == hashlib.sha256(receipt).hexdigest()
                     and all(record.get(k) == audit[k] for k in ("expected", "declaration", "toolchain"))
+                    and (not audit.get("statement") or record.get("statement_sha256") == audit["statement"]["sha256"])
                     and set(record["axioms"]) == set(audit["axioms"])):
                 verification.update(remote="Machine verified on GitHub",
                                     url=f'{p["hosting"]["repository"]}/actions/runs/{ci["run_id"]}/attempts/{ci["attempt"]}',
@@ -299,6 +356,11 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         url = "proofs/index.html#/claim/" + quote(cid, safe="")
         target = ' <strong class="proof-target">Current proof target</strong>' if cid == p.get("focus") else ''
         badge = f' · <a href="{url}?view=lean">{esc(label)}</a>'
+        badge += f' · <a href="{reviews.review_url(cid)}">Review this claim</a>'
+        if rd["disputed"]:
+            badge += f' · {esc(rd["issue"])} · {esc(rd["actor"])}: {esc(rd["next"])}'
+        if "approval" in verification:
+            badge += f' · <a class="approval approved" href="{reviews.review_url(cid)}">{esc(verification["approval"])}</a>'
         if "evidence" in verification:
             badge += f' <a class="verified-badge" href="{esc(verification["url"])}">&#10003; {esc(verification["remote"])}</a>'
             badge += f' · <a href="{esc(verification["evidence"])}">Verification record</a>'
@@ -307,7 +369,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
                           'GitHub artifact (sign-in required)</a>')
         elif "remote" in verification:
             badge += f' · <a href="{esc(verification["url"])}">{esc(verification["remote"])}</a>'
-        rows.append(f'<li data-claim="{esc(cid)}"><a href="{url}">{esc(entry["reference"])} · {esc(c["title"])}</a> · {esc(status)}{badge}{target}<span class="claim-activity"></span></li>')
+        rows.append(f'<li data-claim="{esc(cid)}"><a href="{url}">{esc(entry["reference"])} · {esc(c["title"])}</a> · {esc(entry["status"])}{badge}{target}<span class="claim-activity"></span></li>')
     if ci:
         (output / "logs").mkdir(exist_ok=True)
         atomic(output / "logs/lean-verification.json", Path(ci_receipt).read_bytes())
@@ -326,7 +388,20 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     feed = p.get("hosting", {}).get("activity_url", "")
     total_results = sum(c["kind"] != "conjecture" for c in claims)
     scope = proof_work_description(p, claims, closed_results=closed_results)
-    dashboard = heading + f'<section id="claim-inventory" data-feed="{esc(feed)}"><h2>Claim inventory</h2><p><strong>Authorized proof work</strong><br>{esc(scope)}</p><p>{closed_results} of {total_results} stated results closed</p><ol>' + "".join(rows) + '</ol></section>' + active
+    results = [e for e in entries if e["kind"] != "conjecture"]
+    machine = sum("evidence" in e["verification"] for e in results)
+    reviewed = sum(bool(e["verification"].get("approved")) for e in results)
+    pending = f" · {machine}/{total_results} machine verified · {reviewed}/{total_results} author reviewed"
+    atomic(output/"review.html",review_web.queue(review_entries))
+    shutil.copyfile(assets/"review.css",output/"review.css")
+    guide = (assets.parent/"references"/"author-guide.md").read_text(encoding="utf-8")
+    sections = []
+    for paragraph in guide.strip().split("\n\n"):
+        tag = "h1" if paragraph.startswith("# ") else "h2" if paragraph.startswith("## ") else "p"
+        content = esc(paragraph.lstrip("# ").strip())
+        sections.append(f"<{tag}>" + re.sub(r"`([^`]+)`", r"<code>\1</code>", content) + f"</{tag}>")
+    atomic(output/"guide.html", review_web.document("How to use this atlas","".join(sections),"./"))
+    dashboard = heading + f'<section id="claim-inventory" data-feed="{esc(feed)}"><h2>Claim inventory</h2><p><strong>Authorized proof work</strong><br>{esc(scope)}</p><p><a href="guide.html">How to use this atlas</a> · <a href="review.html">Review queue</a></p><p>{closed_results} of {total_results} stated results closed{pending}</p><ol>' + "".join(rows) + '</ol></section>' + active
     payload = dict(title=p["title"], focus=focus, claims=entries, dependencies=edges, macros=materials.get("macros", {}))
     template = (assets / "explorer.html").read_text(encoding="utf-8-sig")
     packed = json.dumps(payload, ensure_ascii=False)
@@ -339,6 +414,8 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         v = entry["verification"]
         mark = (f'<a class="verified-badge" href="{esc(v["url"])}">✓ {esc(v["remote"])}</a>'
                 if v.get("evidence") else f'<a class="status" href="{link}?view=lean">{esc(v["label"])}</a>')
+        if "approval" in v:
+            mark = f'<span class="marks">{mark}<a class="status approval approved" href="{esc(v["review_url"])}">{esc(v["approval"])}</a></span>'
         contents.append(f'<li><a class="toc-claim" href="{link}"><small>{esc(entry["reference"])}</small>'
                         f'<strong>{esc(entry["title"])}</strong></a>{mark}</li>')
     explorer = (template.replace("__MAST__", mast).replace("__TITLE__", esc(p["title"]))
@@ -369,7 +446,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     atomic(output / "manuscript.pdf", pdf)
     shutil.copyfile(Path(__file__).resolve().parents[1] / "assets/style.css", output / "style.css")
     atomic(output / "inventory.json", json.dumps(claims, ensure_ascii=False, indent=2).encode())
-    atomic(output / "checkpoint.json", json.dumps(dict(revision=version)).encode())
+    atomic(output / "checkpoint.json", json.dumps(dict(revision=version,evidence_commit=ci["commit"] if ci else None,artifact_id=artifact_id)).encode())
     print(f"{len(claims)} claims | {output / 'progress.html'}")
     print(f"Authorized proof work: {scope}")
     if unchecked:
@@ -382,13 +459,42 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["build"])
+    parser.add_argument("operation", choices=["build", "approve", "review", "review-inputs","compare"])
     parser.add_argument("project", type=Path)
+    parser.add_argument("claims", nargs="*", help="approve: claim labels (default: every closed claim awaiting approval)")
+    parser.add_argument("--by", help="approve: the author approving the statements. Only the author runs approve")
     parser.add_argument("--ci-receipt", type=Path, help="Evidence downloaded from the trusted Lean workflow")
     parser.add_argument("--commit", help="Git revision being rendered")
     parser.add_argument("--artifact-id", type=int, help="ID of the GitHub artifact containing the supplied CI receipt")
+    parser.add_argument("--no-open", action="store_true")
+    parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--side",choices=["paper","lean"],help="Limit the independent reader to one source")
+    parser.add_argument("--readings",type=Path,help="Agent comparison record for one claim")
     args = parser.parse_args()
     try:
-        build(args.project.resolve(), ci_receipt=args.ci_receipt, commit=args.commit, artifact_id=args.artifact_id)
+        if args.operation == "approve":
+            reviews.terminal(args.project.resolve(), args.claims, args.by or "")
+            build_local(args.project.resolve())
+        elif args.operation == "review":
+            review_web.serve(args.project.resolve(),not args.no_open,args.port)
+        elif args.operation == "review-inputs":
+            if len(args.claims) != 1:
+                raise ValueError("Choose one claim for independent readings")
+            data = reviews.get_packet(args.project.resolve(),args.claims[0])
+            packet = {"bindings":data["view"]["bindings"]}
+            if args.side != "lean":
+                packet["paper"] = data["view"]["excerpt"]
+            if args.side != "paper":
+                packet["lean"] = data["sources"]
+            if not args.side:
+                packet["reported_differences"] = [e["id"] for e in data["events"] if e["decision"]=="difference"]
+            print(json.dumps(packet,ensure_ascii=False,indent=2))
+        elif args.operation == "compare":
+            if len(args.claims) != 1 or not args.readings:
+                raise ValueError("Supply one claim label and --readings FILE")
+            reviews.save_comparison(args.project.resolve(),args.claims[0],json.loads(args.readings.read_bytes()))
+            build_local(args.project.resolve())
+        else:
+            build(args.project.resolve(), ci_receipt=args.ci_receipt, commit=args.commit, artifact_id=args.artifact_id)
     except (ValueError, KeyError, OSError) as exc:
         sys.exit(f"Proof Atlas: {exc}")

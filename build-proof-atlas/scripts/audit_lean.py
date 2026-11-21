@@ -138,6 +138,70 @@ def module_inputs(lake, root, env, targets, contract):
             ["+" + name for name in sorted(contract_imports)])
 
 
+# Lists the package's own constants that the expected proposition unfolds to. A theorem
+# contributes only its statement, so editing a proof leaves the digest unchanged. Binder
+# names and metadata are erased, so reformatting or moving source leaves it unchanged too.
+STATEMENT_QUERY = r'''
+partial def proofAtlasCanon : Lean.Expr → Lean.Expr
+  | .app f a => .app (proofAtlasCanon f) (proofAtlasCanon a)
+  | .lam _ t b i => .lam `x (proofAtlasCanon t) (proofAtlasCanon b) i
+  | .forallE _ t b i => .forallE `x (proofAtlasCanon t) (proofAtlasCanon b) i
+  | .letE _ t v b d => .letE `x (proofAtlasCanon t) (proofAtlasCanon v) (proofAtlasCanon b) d
+  | .mdata _ e => proofAtlasCanon e
+  | .proj s i e => .proj s i (proofAtlasCanon e)
+  | e => e
+
+#eval show Lean.CoreM Unit from do
+  let env ← Lean.getEnv
+  let local_ : Lean.NameSet := (__LOCAL__ : List String).foldl (fun s m => s.insert m.toName) {}
+  let mut todo := #[(__ROOT__ : String).toName]
+  let mut seen : Lean.NameSet := {}
+  while !todo.isEmpty do
+    let n := todo.back!
+    todo := todo.pop
+    if seen.contains n then continue
+    seen := seen.insert n
+    let some ci := env.find? n | throwError "unknown constant {n}"
+    let mod := (env.getModuleIdxFor? n).map (env.allImportedModuleNames[·]!)
+    unless mod.all local_.contains do continue
+    let value := if ci.isTheorem then none else ci.value? (allowOpaque := true)
+    let (kind, next) : String × Array Lean.Name := match ci with
+      | .inductInfo v => ("inductive", v.ctors.toArray)
+      | .ctorInfo v => ("constructor", #[v.induct])
+      | .defnInfo _ => ("def", #[]) | .thmInfo _ => ("theorem", #[]) | .opaqueInfo _ => ("opaque", #[])
+      | .axiomInfo _ => ("axiom", #[]) | .recInfo _ => ("recursor", #[]) | .quotInfo _ => ("quot", #[])
+    todo := todo ++ ci.type.getUsedConstants ++ (value.map (·.getUsedConstants)).getD #[] ++ next
+    let range ← Lean.findDeclarationRanges? n
+    let text := s!"{kind} {ci.levelParams} : {proofAtlasCanon ci.type}" ++
+      (value.map (s!" := {proofAtlasCanon ·}")).getD ""
+    IO.println <| "PROOF-ATLAS-CONSTANT " ++ (Lean.Json.mkObj [("name", toString n),
+      ("module", Lean.toJson (mod.map toString)), ("canonical", text),
+      ("lines", Lean.toJson (range.map fun r => #[r.range.pos.line, r.range.endPos.line]))]).compress
+'''
+
+
+def statement_record(lake, root, env, contract, expected):
+    """Hash the expected proposition and every definition of this package it unfolds to."""
+    modules = {}
+    for path in inputs(root):
+        if path.endswith(".lean"):
+            modules[path[:-5].replace("/", ".")] = path
+    program = ("import Lean\n" + (root/contract).read_text(encoding="utf-8-sig") + "\n" +
+               STATEMENT_QUERY.replace("__LOCAL__", json.dumps(sorted(modules))).replace("__ROOT__", json.dumps(expected)))
+    result = subprocess.run([*lake, "env", "lean", "--stdin"], input=program.encode(),
+                            cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    output = result.stdout.decode("utf-8-sig", errors="replace")
+    rows = [json.loads(line.split(" ", 1)[1]) for line in output.splitlines()
+            if line.startswith("PROOF-ATLAS-CONSTANT ")]
+    if result.returncode or not rows or rows[0]["name"] != expected:
+        raise ValueError("Could not list the definitions behind the expected statement:\n" + output)
+    constants = sorted((dict(name=row["name"], file=modules.get(row["module"], contract), lines=row["lines"],
+                             sha256=hashlib.sha256(row["canonical"].encode()).hexdigest()) for row in rows),
+                       key=lambda c: c["name"])
+    digest = hashlib.sha256("".join(f'{c["name"]} {c["sha256"]}\n' for c in constants).encode()).hexdigest()
+    return dict(expected=expected, sha256=digest, constants=constants)
+
+
 def inputs(root):
     result = {}
     for directory, children, files in os.walk(root):
@@ -207,6 +271,8 @@ def audit(args):
         print("Warning: no --statements path was given, so nothing checks that the expected proposition "
               "and its definitions are independent of the proof modules. Older atlases keep working; "
               "see 'Separate statements from proofs' in SKILL.md to migrate.", file=sys.stderr)
+    # A custom source layout can hide local definitions from the fingerprint.
+    statement = statement_record(lake, root, env, contract_path, args.expected) if scoped or statements else None
     if scoped is None:
         final = inputs(root)
     else:
@@ -220,7 +286,8 @@ def audit(args):
     return dict(declaration=declaration, contract=contract.relative_to(root).as_posix(),
                 expected=args.expected, toolchain=pin, axioms=axioms,
                 targets=args.target, input_scope="module-closure" if scoped is not None else "full-package",
-                checked_inputs=initial, statements=statements, lean_output=output.strip())
+                checked_inputs=initial, statements=statements, lean_output=output.strip(),
+                **({"statement": statement} if statement else {}))
 
 
 if __name__ == "__main__":

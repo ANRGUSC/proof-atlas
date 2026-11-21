@@ -2,7 +2,7 @@
 name: build-proof-atlas
 description: Build or resume a source-linked proof atlas from a theory paper, open a four-view Proof Atlas explorer and a live progress dashboard, and expose the distinction between paper claims, proof attempts and checked results.
 metadata:
-  version: "0.7.0"
+  version: "0.8.0"
 ---
 
 # Build a Proof Atlas
@@ -10,6 +10,12 @@ metadata:
 Bind the requested edition first. Compare the title, version, TeX and PDF. Record the source revision and SHA-256 digests. If an unversioned URL and a local checkout disagree, check the version-specific record and submission archive. Distinguish a local PDF from the PDF served by a publisher.
 
 Record the edition's canonical HTTP(S) URL in `project.json` as `publication` and its human-readable citation in `edition`. Each build links that citation and the exact bundled manuscript PDF in the explorer and dashboard headers. When hosting is configured or moved, refresh the paper repository's renderer snapshot (or pinned release), rebuild, and verify both header links from the deployed explorer and dashboard. The PDF link resolves under the site's own base path. For an unpublished manuscript, leave the citation as text and keep the PDF link active.
+
+## Author review and orientation
+
+On the first build, open the explorer and dashboard and give their full URLs or absolute paths, the current claim, the authorized stopping point, and the phrase “Open the local review dashboard for this paper.” Point readers to **How to use this atlas**. Start or reuse the local review server whenever requested, including during proof work or on a later day.
+
+Read new review feedback at checkpoints and on resume. For every paper claim, run the [independent correspondence workflow](references/correspondence.md) at statement preparation and again on checked evidence. Resolve discrepancies and continue the authorized scope. The dashboard reports formal checks, optional author review, outstanding differences and the next actor separately. A known mismatch reopens the paper obligation while preserving evidence for the actual formal result. Human review is optional and never gates an otherwise completed proof run. Only a human records author decisions. For review, migration or publication use the [author guide](references/author-guide.md).
 
 ## Start a project
 
@@ -29,7 +35,7 @@ Check `python <skill>/scripts/hosting.py <project>` on first import and resume. 
 
 During parallel proof work, publish a reviewed commit while other authors continue in the same checkout. Include each newly checked source, its transitive local dependencies, and the evidence referenced by the inventory. The publishing helper compares recorded input hashes with the committed Git blobs and pushes that revision. Reconcile reported mismatches, then verify the deployed claim rows and downloadable audits against the local receipts.
 
-When GitHub hosting is chosen, ask once whether GitHub Actions should independently rebuild the Lean proofs and publish per-claim verification links. Honor an existing choice. Record approval with `hosting.py <project> --lean-ci` or a decline with `--no-lean-ci`. For an enabled project, the agent installs the [Lean workflow](references/verify-lean.yml), includes the current scripts and assets at `tools/proof-atlas`, and integrates the verification-artifact step and completion trigger from the [Pages workflow](references/github-pages.yml). Reuse compatible existing CI and preserve custom deployment steps. Trigger the check, monitor it, and verify the published badges. If Actions or a pinned dependency is unavailable, keep the local evidence visible and report the blocker.
+When GitHub hosting is chosen, ask once whether GitHub Actions should independently rebuild the Lean proofs and publish per-claim verification links. Honor an existing choice. Record approval with `hosting.py <project> --lean-ci` or a decline with `--no-lean-ci`. For an enabled project, the agent installs the [Lean workflow](references/verify-lean.yml), includes the current scripts, assets and references/author-guide.md at `tools/proof-atlas`, and integrates the verification-artifact step and completion trigger from the [Pages workflow](references/github-pages.yml). Reuse compatible existing CI and preserve custom deployment steps. Trigger the check, monitor it, and verify the published badges. If Actions or a pinned dependency is unavailable, keep the local evidence visible and report the blocker.
 
 The explorer and dashboard show **Lean checked** for an audited paper claim, **Subproofs checked** for checked parts of an unfinished claim, and **Machine verified on GitHub** only when the trusted workflow independently checked that declaration and expected type at the published commit. Changed inputs require a fresh check.
 
