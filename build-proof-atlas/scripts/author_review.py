@@ -9,9 +9,19 @@ from pathlib import Path
 
 BADGE = "Author reviewed the theorem statement proved in Lean"
 ADVICE = {"match": "Recommend approval", "difference": "Report a difference", "unsure": "Hold approval for clarification"}
+# How each compared case relates to the paper. Every kind except "agrees" counts as a difference.
+KINDS = ("agrees", "added hypothesis", "restriction", "chosen reading", "other form", "stronger")
 
 
-def validate_analysis(analysis, result):
+def differences(analysis):
+    """The non-agreeing cases, or None when some case predates classification."""
+    cases = (analysis or {}).get("cases", [])
+    if not all("kind" in row for row in cases):
+        return None
+    return [row for row in cases if row["kind"] != "agrees"]
+
+
+def validate_analysis(analysis, result, require_kinds=False):
     def present(obj, fields):
         return isinstance(obj, dict) and all(isinstance(obj.get(k), str) and obj[k].strip() for k in fields)
 
@@ -20,6 +30,8 @@ def validate_analysis(analysis, result):
     cases = analysis.get("cases")
     if not isinstance(cases, list) or not cases or not all(present(row, ("case", "paper", "lean", "why")) for row in cases):
         raise ValueError("Explain at least one case with its paper claim, Lean claim and mathematical justification")
+    if any(row.get("kind", KINDS[0]) not in KINDS or require_kinds and "kind" not in row for row in cases):
+        raise ValueError("Give each case a kind: " + ", ".join(KINDS))
     if (result != "match" or "suggested_feedback" in analysis) and not present(analysis, ("suggested_feedback",)):
         raise ValueError("Supply suggested feedback the author can use to describe the difference or question")
 
@@ -213,7 +225,7 @@ def save_comparison(root,cid,record):
         result = record.get("result")
         if result not in ("match","difference","unsure"):
             raise ValueError("Choose match, difference or unsure")
-        validate_analysis(record.get("analysis"), result)
+        validate_analysis(record.get("analysis"), result, require_kinds=True)
         if "stronger_result" in record and (result!="match" or
                 not isinstance(record["stronger_result"],str) or not record["stronger_result"].strip()):
             raise ValueError("Use a stronger-result note only for a match and describe the extra conclusion")
@@ -252,7 +264,8 @@ def terminal(root,labels,by,ask=input):
         if analysis := view.get("analysis"):
             print("Agent analysis", analysis["summary"], sep="\n")
             for row in analysis["cases"]:
-                print(row["case"], "Paper: "+row["paper"], "Lean: "+row["lean"], row["why"], sep="\n")
+                print(row["case"]+" · "+row.get("kind", "not classified"), "Paper: "+row["paper"], "Lean: "+row["lean"],
+                      row["why"], sep="\n")
             print("Scope", analysis["scope"], sep="\n")
             if not data["feedback_open"]:
                 print(ADVICE[view["result"]], analysis["advice"], sep="\n")

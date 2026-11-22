@@ -346,6 +346,8 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         review_entries.append(rd)
         atomic(output/reviews.review_url(cid),review_web.render(rd))
         entry["status"] = "correspondence under review" if rd["disputed"] else status
+        if "analysis" in rd["view"]:
+            entry["differences"] = reviews.differences(rd["view"]["analysis"])
         if c["kind"] != "conjecture" and checked and not rd["disputed"]:
             closed_results += 1
         entry.setdefault("reference", c["kind"].title())
@@ -410,6 +412,9 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         badge += f' · <a href="{reviews.review_url(cid)}">Review this claim</a>'
         if rd["disputed"]:
             badge += f' · {esc(rd["issue"])} · {esc(rd["actor"])}: {esc(rd["next"])}'
+        if entry.get("differences") is not None:
+            count = len(entry["differences"])
+            badge += (f' · <a href="{url}?view=paper">{count or "No"} difference{"" if count == 1 else "s"} from the paper</a>')
         if "approval" in verification:
             badge += f' · <a class="approval approved" href="{reviews.review_url(cid)}">{esc(verification["approval"])}</a>'
         if rd["stronger_result"]:

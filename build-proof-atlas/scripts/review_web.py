@@ -34,7 +34,7 @@ def render(data,secret=None,notice=""):
         if not analysis:
             return ""
         rows = "".join(
-            "<tr><th scope=\"row\">"+esc(row["case"])+"</th>"+
+            "<tr><th scope=\"row\">"+esc(row["case"])+"<br><small>"+esc(row.get("kind","not classified"))+"</small></th>"+
             "".join("<td>"+esc(row[k])+"</td>" for k in ("paper","lean","why"))+"</tr>"
             for row in analysis["cases"])
         parts = ['<section class="analysis"><h2>How the statements compare</h2>', para(analysis["summary"]),

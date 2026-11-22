@@ -93,6 +93,17 @@ function proofView(c,view) {
     if(c.page){const frame=el("iframe");frame.title="Paper passage, page "+c.page;frame.src=url;pane.append(frame);}
     const details=el("details");details.open=!c.page;
     details.append(el("summary","Verbatim TeX · "+c.file+", line "+c.line),el("pre",c.excerpt));pane.append(details);
+    if(c.differences!==undefined){
+      // From the comparison the author reviews: each case that does not simply agree with the paper.
+      pane.append(el("h3","Differences from the paper"));
+      if(c.differences===null) pane.append(el("p","Differences not classified.","muted"));
+      else if(!c.differences.length) pane.append(el("p","Every compared case agrees.","muted"));
+      for(const d of c.differences||[]){
+        const item=el("div",null,"proof-step");
+        item.append(el("strong",d.kind+" · "+d.case),rich("Paper: "+d.paper),rich("Lean: "+d.lean),rich(d.why));
+        pane.append(item);
+      }
+    }
   } else if(view==="lamport"){
     if(c.steps){
       pane.append(el("p",c.origin || "Structured proof","muted"));
