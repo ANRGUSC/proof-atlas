@@ -220,9 +220,14 @@ partial def proofAtlasDefaults (heads : Lean.NameSet) (e : Lean.Expr) (acc : Arr
 # mathematical object is undefined, so a statement built on one can be true and mean nothing.
 DEFAULT_VALUES = {
     "HDiv.hDiv": "x / 0 = 0", "Inv.inv": "0⁻¹ = 0",
+    "Ring.inverse": "0 when not a unit (e.g., singular matrix or non-invertible element)",
+    "Matrix.inv": "singular matrix A⁻¹ evaluates to a default (0) when det A is not a unit",
     "HSub.hSub": "a − b = 0 when b > a", "Nat.sub": "a − b = 0 when b > a", "Nat.pred": "pred 0 = 0",
     "Real.log": "log 0 = 0, log x = log |x|", "Real.logb": "logb b 0 = 0, logb b x = logb b |x|, 0 when log b = 0",
     "Real.sqrt": "√x = 0 for x < 0",
+    "ENNReal.toReal": "⊤.toReal = 0 (infinite values, expectations, or ∫⁻ integrals map silently to 0)",
+    "ENNReal.toNNReal": "⊤.toNNReal = 0 (infinite values map silently to 0)",
+    "ENNReal.ofReal": "ofReal x = 0 when x ≤ 0",
     "InfSet.sInf": "sInf ∅ = 0 in ℝ and ℕ; 0 in ℝ when unbounded below",
     "SupSet.sSup": "sSup ∅ = 0 in ℝ; 0 when unbounded above",
     "iInf": "as sInf of the range: 0 in ℝ when empty or unbounded below",
@@ -231,14 +236,19 @@ DEFAULT_VALUES = {
     "Filter.limUnder": "an arbitrary value when the limit does not exist",
     "limUnder": "an arbitrary value when the limit does not exist", "tsum": "0 when not summable",
     "MeasureTheory.integral": "0 when not integrable", "intervalIntegral": "0 when not integrable on the interval",
+    "MeasureTheory.condExp": "0 when not integrable or on non-σ-finite measures",
     "deriv": "0 when not differentiable", "derivWithin": "0 when not differentiable within the set",
     "fderiv": "0 when not differentiable",
+    "Function.invFun": "an arbitrary value when the argument is not in the range of f",
 }
 
 
 def default_meaning(use):
-    if use["construct"] == "HDiv.hDiv" and use.get("type") in ("ℕ", "ℤ", "Nat", "Int"):
+    ty = use.get("type", "")
+    if use["construct"] == "HDiv.hDiv" and ty in ("ℕ", "ℤ", "Nat", "Int"):
         return "x / 0 = 0, and division rounds down"
+    if use["construct"] == "Inv.inv" and (ty == "Matrix" or ty.startswith("Matrix ") or ty.startswith("(Matrix ")):
+        return "singular matrix A⁻¹ evaluates to a default (0) when det A is not a unit"
     return DEFAULT_VALUES.get(use["construct"], "")
 
 
