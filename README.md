@@ -29,6 +29,12 @@ Bhaskar Krishnamachari’s *A Block Hierarchy for Rate-Distortion and Dispersion
 | What did Lean actually check? | Open the formal declaration and its audit. The green badge leads to the GitHub run that rebuilt it. The public record identifies the commit, declaration, expected statement, and axioms. [Lean view](https://anrgusc.github.io/markov-block-hierarchy-proof-atlas/proofs/index.html#/claim/thm%3Acommon?view=lean) · [Verification run](https://github.com/ANRGUSC/markov-block-hierarchy-proof-atlas/actions/runs/44775699155/attempts/1) · [Verification record](https://anrgusc.github.io/markov-block-hierarchy-proof-atlas/logs/lean-verification.json) |
 | How much of the paper is done? | The dashboard lists each claim, its status, the authorized scope of work, and available evidence. During formalization it can also show which claim is being written or checked. [Progress dashboard](https://anrgusc.github.io/markov-block-hierarchy-proof-atlas/progress.html) |
 
+## What the badges mean
+
+**Lean checked** means Lean accepted a proof of the formal statement shown in the Lean view, using only Lean’s standard axioms. **Machine verified on GitHub** means a separate GitHub run repeated that check at the published commit. **Author reviewed** means a named person compared that formal statement with the paper and accepted it. Neither Lean badge says the formal statement is the paper’s theorem. To judge that, read the Lean statement and its definitions beside the paper. The Plain English and Lamport proof views are explanations, not machine-checked, and Lean’s proof may take a different route from the paper’s.
+
+The audit checks the declaration’s type and axioms, which catches mistakes by an honest agent. It does not defend against proof files written to game those checks. For proofs you do not trust, use a dedicated checker such as the Lean FRO’s [Comparator](https://github.com/leanprover/comparator).
+
 ## Credits
 
 Scott Moeller and Bhaskar Krishnamachari created Proof Atlas.
