@@ -205,6 +205,28 @@ def current_audit(root, cid, w):
     return audit
 
 
+def current_statement_audit(root, cid, w):
+    """Return `(audit, proof_checked)` for either a closed claim or a Gate 1 statement check."""
+    if w.get("status") == "closed":
+        return current_audit(root, cid, w), True
+    sc = w.get("statement_check")
+    if not sc:
+        raise ValueError(f"{cid}: only a closed claim or a drafted claim with a statement audit can be compared")
+    audit = json.loads(local(root, sc["audit"]).read_bytes())
+    package = Path(sc["package"])
+    checked_inputs = audit.get("checked_inputs") or {}
+    if (not audit.get("statement_only") or not checked_inputs or not audit.get("statements") or
+            audit.get("expected") != sc.get("expected") or
+            not audit.get("statement", {}).get("sha256") or
+            set(audit.get("axioms", [])) - {"propext", "Classical.choice", "Quot.sound"}):
+        raise ValueError(f"{cid}: inconsistent statement audit receipt")
+    for name, digest in checked_inputs.items():
+        path = (package / name).as_posix()
+        if not local(root, path).is_file() or hashlib.sha256(local(root, path).read_bytes()).hexdigest() != digest:
+            raise ValueError(f"{cid}: {path} changed since the statement check; rerun audit_lean.py --statement-only")
+    return audit, False
+
+
 def statement_defaults(audit):
     """The receipt's default-value uses in the statement's definitions, each with its meaning."""
     from audit_lean import default_meaning  # audit_lean imports atlas through check_lean
@@ -214,7 +236,8 @@ def statement_defaults(audit):
 def checked_defaults(root, cid):
     work = reviews.read(root/"project.json", {}).get("work", {}).get(cid, {})
     try:
-        return statement_defaults(current_audit(root, cid, work))
+        audit, _ = current_statement_audit(root, cid, work)
+        return statement_defaults(audit)
     except ValueError:
         return []
 
@@ -268,7 +291,9 @@ def review_work(root, labels=(), *, require_ci=False, ci_receipt=None):
     for cid in selected:
         work = project.get("work", {}).get(cid, {})
         packet = reviews.get_packet(root,cid)
-        if packet["disputed"] or work.get("status")=="closed" and packet["actor"]=="Proof agent":
+        needs_gate1_review = (work.get("status") != "closed" and packet["statement_checked"]
+                              and not packet["disputed"] and "analysis" not in packet["view"])
+        if packet["disputed"] or (work.get("status")=="closed" and packet["actor"]=="Proof agent") or needs_gate1_review:
             key = "author_questions" if packet["actor"]=="Author" else "agent_tasks"
             report[key].append(dict(claim=cid, issue=packet["issue"], next=packet["next"]))
         if require_ci and work.get("status")=="closed":
@@ -360,11 +385,21 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
             entry["summary"] = m.get("summary", "The paper claim is awaiting a fresh Lean check.")
             status = "awaiting recheck"
         checked = status == "closed"
-        rd = reviews.packet(root,p,c,w,audit if checked else None,comparisons.get(cid),reviews.history(root,cid),checked)
+        statement_audit = audit if checked else None
+        statement_checked = False
+        if not checked and w.get("statement_check"):
+            try:
+                statement_audit, _ = current_statement_audit(root, cid, w)
+                statement_checked = True
+                entry["hypotheses"] = statement_audit.get("hypotheses")
+            except ValueError:
+                statement_audit = None
+        active_audit = audit if checked else statement_audit
+        rd = reviews.packet(root,p,c,w,active_audit,comparisons.get(cid),reviews.history(root,cid),checked,statement_checked)
         rd["page"] = entry.get("page")
-        rd["sources"] = reviews.exact_sources(root,w,audit) if checked else []
-        rd["witness"] = reviews.witness_source(root,w,audit) if checked else None
-        rd["defaults"] = entry["defaults"] = statement_defaults(audit if checked else None)
+        rd["sources"] = reviews.exact_sources(root,w,active_audit) if active_audit else []
+        rd["witness"] = reviews.witness_source(root,w,active_audit) if active_audit else None
+        rd["defaults"] = entry["defaults"] = statement_defaults(active_audit)
         review_entries.append(rd)
         atomic(output/reviews.review_url(cid),review_web.render(rd))
         entry["status"] = "correspondence under review" if rd["disputed"] else status
@@ -389,7 +424,8 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         has_parts = any(part["status"] == "checked" for part in subproofs)
         label = ("Open conjecture" if c["kind"] == "conjecture" and status == "open" else
                  "Lean checked" if checked else "Awaiting Lean recheck" if changed else
-                 "Subproofs checked" if has_parts else "No completed Lean check")
+                 "Subproofs checked" if has_parts else
+                 "Statement drafted (proof in progress)" if statement_checked else "No completed Lean check")
         verification = {"label": label}
         verification["review_url"] = reviews.review_url(cid)
         for key in ("stronger_result", "author_scope"):
@@ -442,6 +478,8 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
             badge += (f' · <a href="{url}?view=paper">{count or "No"} difference{"" if count == 1 else "s"} from the paper</a>')
         if "approval" in verification:
             badge += f' · <a class="approval approved" href="{reviews.review_url(cid)}">{esc(verification["approval"])}</a>'
+        elif rd.get("preapproved"):
+            badge += f' · <a href="{reviews.review_url(cid)}">Statement approved (proof in progress)</a>'
         if rd["stronger_result"]:
             badge += f' · <a href="{reviews.review_url(cid)}#scope-note">Lean proves more</a>'
         if rd["author_scope"]:

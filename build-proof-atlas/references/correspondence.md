@@ -1,6 +1,6 @@
 # Recording correspondence
 
-Before proof work, compare each proposed formal statement against the pinned paper. Record its objects, inherited hypotheses, ranges, and every conclusion. Track missing conclusions as subproofs. Repeat with the checked declaration before marking the automated comparison complete.
+Before proof work (Gate 1), run `audit_lean.py --statement-only --statements Statements`, attach `statement_check` to the drafted checkpoint, and compare each proposed formal statement against the pinned paper with `atlas.py review-inputs` and `atlas.py compare`. Record its objects, inherited hypotheses, ranges, and every conclusion. Track missing conclusions as subproofs. If Gate 1 finds a `difference` or `unsure` with `actor: "Author"`, pause that claim, highlight the mismatch to the author, and move on to another eligible claim rather than proving an unconfirmed reading. When the proof closes without changing `Statements/`, `statement.sha256` matches and the Gate 1 comparison (and any optional author approval) carries over automatically; if `Statements/` changed, repeat the comparison on the checked closure.
 
 ## Independent readings
 

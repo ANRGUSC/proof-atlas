@@ -66,9 +66,10 @@ def history(root, cid):
     return book["claims"].get(cid, [])
 
 
-def packet(root, project, claim, work, audit, comparison, events, checked):
+def packet(root, project, claim, work, audit, comparison, events, checked, statement_checked=False):
     keys = bindings(project, claim, audit)
-    current = comparison and comparison.get("bindings") == keys and checked and keys["statement"]
+    has_statement = bool((checked or statement_checked) and keys["statement"])
+    current = comparison and comparison.get("bindings") == keys and has_statement
     fields = ("paper_reading", "lean_reading", "paper_refs", "lean_refs")
     if current:
         if comparison.get("result") not in ("match", "difference", "unsure") or any(
@@ -94,31 +95,51 @@ def packet(root, project, claim, work, audit, comparison, events, checked):
     original_view = {k:v for k,v in view.items() if k not in ("analysis","result")}
     prior_readings = ("analysis" in view and last.get("view") == original_view and
                       last.get("version") == digest(original_view))
-    approved = checked and comp.get("result") == "match" and not disputed and last.get("decision") == "approve" and (last.get("version") == version or prior_readings)
+    statement_approved = (has_statement and comp.get("result") == "match" and not disputed
+                          and last.get("decision") == "approve" and (last.get("version") == version or prior_readings))
+    approved = bool(checked and statement_approved)
+    preapproved = bool(statement_checked and not checked and statement_approved)
     if outstanding:
         issue, actor, step = " · ".join(e["comment"] for e in outstanding), "Proof agent", "Investigate the reported difference and record a resolution."
     elif machine_issue:
         issue, actor, step = (comparison.get(k,"") for k in ("issue","actor","next"))
-    elif not checked:
-        issue, actor, step = "", "Proof agent", ("Refresh the Lean audit for the current sources." if work.get("status") == "closed" else work.get("next") or "Finish the Lean check.")
-    elif not keys["statement"]:
-        issue, actor, step = "", "Proof agent", "Refresh the legacy audit to record statement fingerprints for optional review."
+    elif not has_statement:
+        if work.get("status") == "closed":
+            step = ("Refresh the Lean audit for the current sources." if not checked
+                    else "Refresh the legacy audit to record statement fingerprints for optional review.")
+        elif work.get("statement_check"):
+            step = "Refresh the statement audit for the current sources."
+        else:
+            step = work.get("next") or "Finish the Lean check."
+        issue, actor = "", "Proof agent"
     elif not comp:
         issue, actor, step = "", "Proof agent", "Prepare independent paper and Lean readings."
     elif "analysis" not in comp:
         issue, actor, step = "", "Proof agent", "Add the case-by-case justification and recommendation."
+    elif not checked:
+        if preapproved:
+            issue, actor, step = "", "Proof agent", work.get("next") or "Finish the Lean proof."
+        else:
+            issue, actor, step = "", "Author (optional)", "Review the drafted statement whenever convenient while proof work continues."
     else:
         issue, actor, step = "", "Author (optional)", "Review the comparison whenever convenient."
     return dict(id=claim["id"], title=claim["title"], view=view, version=version,
-                token=digest([version, comparison, last.get("id"), checked]), events=events,
-                checked=checked, approved=bool(approved), disputed=disputed,
+                token=digest([version, comparison, last.get("id"), checked, bool(statement_checked)]), events=events,
+                checked=checked, statement_checked=bool(checked or statement_checked),
+                approved=approved, preapproved=preapproved, disputed=disputed,
                 ready=bool("analysis" in view and comp.get("result")=="match" and not disputed),
-                feedback_open=bool(outstanding), approved_before_analysis=bool(approved and prior_readings),
+                feedback_open=bool(outstanding), approved_before_analysis=bool((approved or preapproved) and prior_readings),
                 stronger_result=stronger if not disputed else "",
-                author_scope=last.get("scope_note","") if approved else "",
+                author_scope=last.get("scope_note","") if (approved or preapproved) else "",
                 assessment={"match":"Automated comparison found no discrepancy","difference":"Difference found",
                             "unsure":"Interpretation unresolved"}.get(comp.get("result"), "Comparison pending"),
                 issue=issue, actor=actor, next=step, resolution=comp.get("resolution",""))
+
+
+def _audit_package(work):
+    if work.get("status") == "closed" and work.get("closure"):
+        return work["closure"]["package"]
+    return (work.get("statement_check") or work["closure"])["package"]
 
 
 def exact_sources(root, work, audit):
@@ -126,7 +147,7 @@ def exact_sources(root, work, audit):
     result = []
     if not audit:
         return result
-    package = work["closure"]["package"]
+    package = _audit_package(work)
     seen = set()
     for c in sorted(audit.get("statement", {}).get("constants", []),
                     key=lambda x:(x["name"] != audit["expected"], x["name"])):
@@ -148,14 +169,14 @@ def witness_source(root, work, audit):
     item = dict(declaration=hyp["declaration"], proposition=hyp["proposition"])
     file, lines = hyp.get("file"), hyp.get("lines")
     if file and lines:
-        package = work["closure"]["package"]
+        package = _audit_package(work)
         source = local(root, package + "/" + file).read_text(encoding="utf-8-sig").splitlines()
         item.update(file=file, lines=lines, text="\n".join(source[lines[0]-1:lines[1]]))
     return item
 
 
 def get_packet(root, cid):
-    from atlas import current_audit, manuscript_claims, read_source, local
+    from atlas import current_statement_audit, manuscript_claims, read_source, local
     project = read(root/"project.json", {})
     read_source(root,project["pdf"])
     claim = next((c for c in manuscript_claims(root,project) if c["id"]==cid), None)
@@ -164,14 +185,15 @@ def get_packet(root, cid):
     work = project.get("work", {}).get(cid, {})
     audit = None
     checked = False
-    if work.get("status") == "closed":
+    statement_checked = False
+    if work.get("status") == "closed" or work.get("statement_check"):
         try:
-            audit = current_audit(root,cid,work)
-            checked = True
+            audit, checked = current_statement_audit(root,cid,work)
+            statement_checked = True
         except ValueError:
             pass
     comp = read(root/"comparisons.json", {}).get(cid)
-    data = packet(root,project,claim,work,audit,comp,history(root,cid),checked)
+    data = packet(root,project,claim,work,audit,comp,history(root,cid),checked,statement_checked)
     reader = read(local(root,project["reader"]), {}) if project.get("reader") else {}
     data["page"] = work.get("page") or reader.get("claims",{}).get(cid,{}).get("page")
     data["sources"] = exact_sources(root,work,audit)
@@ -230,7 +252,7 @@ def save_comparison(root,cid,record):
     from atlas import atomic
     with project_lock(root):
         data = get_packet(root,cid)
-        if not data["checked"] or not data["view"]["bindings"]["statement"]:
+        if not data["statement_checked"] or not data["view"]["bindings"]["statement"]:
             raise ValueError("Refresh the checked statement fingerprint before recording a comparison")
         if record.get("bindings") != data["view"]["bindings"]:
             raise ValueError("Comparison inputs changed; repeat the readings")
@@ -268,7 +290,7 @@ def terminal(root,labels,by,ask=input):
     project = read(root/"project.json", {})
     for cid in labels or [c["id"] for c in manuscript_claims(root,project)]:
         data=get_packet(root,cid)
-        if not labels and (data["approved"] or not data["checked"]):
+        if not labels and (data["approved"] or data.get("preapproved") or not data["statement_checked"]):
             continue
         print(cid, data["view"]["edition"], data["view"]["excerpt"], sep="\n")
         if data["stronger_result"]:
