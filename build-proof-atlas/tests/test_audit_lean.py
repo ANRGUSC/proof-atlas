@@ -230,6 +230,7 @@ class AuditClosure(unittest.TestCase):
 
             record = audit("good")["hypotheses"]
             self.assertEqual((record["declaration"], record["proposition"]), ("good", "∃ n, 0 < n ∧ n < 10"))
+            self.assertEqual((record["file"], record["lines"]), ("Examples/Main.lean", [2, 2]))
             self.assertLessEqual(set(record["axioms"]), {"propext", "Classical.choice", "Quot.sound"})
             # The example must prove exactly the hypotheses, named in the error.
             with self.assertRaisesRegex(ValueError, r"proves\n  ∃ n, 0 < n\nbut the hypotheses of Statement need\n  ∃ n, 0 < n ∧ n < 10"):

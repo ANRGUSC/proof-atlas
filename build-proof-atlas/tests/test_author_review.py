@@ -252,3 +252,24 @@ class StatementApproval(unittest.TestCase):
         git("add","comparisons.json")
         git("commit","-qm","Updated review")
         self.assertEqual(status()["ci_pending"],["t"])
+
+    def test_review_inputs_includes_witness_snippet(self):
+        from review_web import render
+        (self.root / "lean/Examples.lean").write_text("import T\ntheorem nonempty_case : True := trivial\n", encoding="utf-8")
+        audit = json.loads((self.root / "audit.json").read_bytes())
+        audit["hypotheses"] = {"declaration": "nonempty_case", "proposition": "True", "axioms": [],
+                               "file": "Examples.lean", "lines": [2, 2]}
+        (self.root / "audit.json").write_text(json.dumps(audit), encoding="utf-8")
+        script = Path(__file__).resolve().parents[1] / "scripts/atlas.py"
+        lean_side = json.loads(subprocess.check_output(
+            [sys.executable, str(script), "review-inputs", str(self.root), "t", "--side", "lean"], text=True))
+        self.assertEqual(lean_side["witness"], {
+            "declaration": "nonempty_case", "proposition": "True",
+            "file": "Examples.lean", "lines": [2, 2], "text": "theorem nonempty_case : True := trivial",
+        })
+        paper_side = json.loads(subprocess.check_output(
+            [sys.executable, str(script), "review-inputs", str(self.root), "t", "--side", "paper"], text=True))
+        self.assertNotIn("witness", paper_side)
+        html_page = render(self.packet()).decode("utf-8")
+        self.assertIn("Inspect the checked hypotheses example · nonempty_case · Examples.lean L2", html_page)
+        self.assertIn("theorem nonempty_case : True := trivial", html_page)

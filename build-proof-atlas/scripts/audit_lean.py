@@ -241,16 +241,22 @@ partial def proofAtlasPaths (e : Lean.Expr) (xs chosen : Array Lean.Expr) : Lean
     return #[]
 
 #eval show Lean.MetaM Unit from do
-  let some ci := (← Lean.getEnv).find? (__EXPECTED__ : String).toName | throwError "unknown expected proposition"
+  let env ← Lean.getEnv
+  let some ci := env.find? (__EXPECTED__ : String).toName | throwError "unknown expected proposition"
   let some v := ci.value? | throwError "the expected proposition has no definition body"
   let us ← ci.levelParams.mapM fun _ => Lean.Meta.mkFreshLevelMVar
   let paths ← proofAtlasPaths (v.instantiateLevelParams ci.levelParams us) #[] #[]
   let goal := paths.pop.foldr Lean.mkAnd (paths.back?.getD (Lean.mkConst ``True))
-  let w ← Lean.Meta.inferType (← Lean.Meta.mkConstWithFreshMVarLevels (__WITNESS__ : String).toName)
+  let wn := (__WITNESS__ : String).toName
+  let w ← Lean.Meta.inferType (← Lean.Meta.mkConstWithFreshMVarLevels wn)
   let ok ← Lean.Meta.isDefEq w goal
+  let mod := (env.getModuleIdxFor? wn).map (env.allImportedModuleNames[·]!)
+  let range ← Lean.findDeclarationRanges? wn
   IO.println <| "PROOF-ATLAS-HYPOTHESES " ++ (Lean.Json.mkObj [("matches", Lean.toJson ok),
     ("needed", toString (← Lean.Meta.ppExpr (← Lean.instantiateMVars goal))),
-    ("proved", toString (← Lean.Meta.ppExpr (← Lean.instantiateMVars w)))]).compress
+    ("proved", toString (← Lean.Meta.ppExpr (← Lean.instantiateMVars w))),
+    ("module", Lean.toJson (mod.map toString)),
+    ("lines", Lean.toJson (range.map fun r => #[r.range.pos.line, r.range.endPos.line]))]).compress
 '''
 
 
@@ -269,6 +275,7 @@ def axiom_report(output, declaration):
 
 def hypotheses_record(lake, root, env, contract, expected, witness):
     """Check that `witness` proves the hypotheses of `expected` can all hold, using standard axioms."""
+    modules = {path[:-5].replace("/", "."): path for path in inputs(root) if path.endswith(".lean")}
     program = ("import Lean\n" + (root/contract).read_text(encoding="utf-8-sig") + "\n" +
                HYPOTHESES_QUERY.replace("__EXPECTED__", json.dumps(expected)).replace("__WITNESS__", json.dumps(witness)) +
                f"#print axioms {witness}\n")
@@ -282,7 +289,13 @@ def hypotheses_record(lake, root, env, contract, expected, witness):
     if not rows[0]["matches"]:
         raise ValueError(f"The example {witness} proves\n  {rows[0]['proved']}\nbut the hypotheses of {expected} "
                          f"need\n  {rows[0]['needed']}\nState the example with that type.")
-    return dict(declaration=witness, proposition=rows[0]["needed"], axioms=axiom_report(output, witness))
+    record = dict(declaration=witness, proposition=rows[0]["needed"], axioms=axiom_report(output, witness))
+    mod = rows[0].get("module")
+    witness_file = contract if mod is None else modules.get(mod)
+    if witness_file and rows[0].get("lines"):
+        record["file"] = witness_file
+        record["lines"] = rows[0]["lines"]
+    return record
 
 
 def inputs(root):

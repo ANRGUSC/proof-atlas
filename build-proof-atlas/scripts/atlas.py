@@ -349,6 +349,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         rd = reviews.packet(root,p,c,w,audit if checked else None,comparisons.get(cid),reviews.history(root,cid),checked)
         rd["page"] = entry.get("page")
         rd["sources"] = reviews.exact_sources(root,w,audit) if checked else []
+        rd["witness"] = reviews.witness_source(root,w,audit) if checked else None
         review_entries.append(rd)
         atomic(output/reviews.review_url(cid),review_web.render(rd))
         entry["status"] = "correspondence under review" if rd["disputed"] else status
@@ -566,6 +567,8 @@ if __name__ == "__main__":
                 packet["paper"] = data["view"]["excerpt"]
             if args.side != "paper":
                 packet["lean"] = data["sources"]
+                if data.get("witness"):
+                    packet["witness"] = data["witness"]
             if not args.side:
                 packet["reported_differences"] = [e["id"] for e in data["events"] if e["decision"]=="difference"]
             print(json.dumps(packet,ensure_ascii=False,indent=2))
