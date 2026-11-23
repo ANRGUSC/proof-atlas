@@ -224,6 +224,25 @@ def build_local(root):
     return build(root, **options)
 
 
+def witness_plan(project, work, witness):
+    mode = work.get("witness_search", project.get("witness_search", "available"))
+    if mode not in ("available", "skip", "pursue"):
+        raise ValueError("witness_search must be available, skip, or pursue")
+    missing = work.get("witness_missing_result")
+    if witness:
+        action = "reuse checked witness"
+    elif mode == "skip":
+        action = "skip search"
+    elif missing:
+        action = "pursue missing result" if mode == "pursue" else "defer missing result"
+    else:
+        action = "try a concrete example or existing lemma"
+    plan = {"mode": mode, "action": action}
+    if missing and not witness:
+        plan["missing_result"] = missing
+    return plan
+
+
 def review_work(root, labels=(), *, require_ci=False, ci_receipt=None):
     """List actionable review findings. Optional approvals are never obligations."""
     import subprocess
@@ -233,7 +252,7 @@ def review_work(root, labels=(), *, require_ci=False, ci_receipt=None):
         raise ValueError("Unknown review-work claim")
     selected = list(dict.fromkeys(labels or claims))
     report = {"scope": project.get("proof_work"), "agent_tasks": [], "author_questions": [],
-              "uncommitted_delivery_files": [], "ci_pending": []}
+              "uncommitted_delivery_files": [], "ci_pending": [], "witness_search": {}}
     ci = None
     if require_ci:
         if project.get("hosting", {}).get("lean_ci") != "enabled":
@@ -254,6 +273,8 @@ def review_work(root, labels=(), *, require_ci=False, ci_receipt=None):
     for cid in selected:
         work = project.get("work", {}).get(cid, {})
         packet = reviews.get_packet(root,cid)
+        if claims[cid]["kind"] != "conjecture":
+            report["witness_search"][cid] = witness_plan(project, work, packet["witness"])
         if packet["disputed"] or work.get("status")=="closed" and packet["actor"]=="Proof agent":
             key = "author_questions" if packet["actor"]=="Author" else "agent_tasks"
             report[key].append(dict(claim=cid, issue=packet["issue"], next=packet["next"]))

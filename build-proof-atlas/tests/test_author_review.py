@@ -66,6 +66,39 @@ class StatementApproval(unittest.TestCase):
         record.update(updates)
         review.save_comparison(self.root,"t",record)
 
+    def test_project_witness_search_and_claim_exception(self):
+        path = self.root / "project.json"
+        work = self.project["work"]["t"]
+
+        def plan():
+            path.write_text(json.dumps(self.project), encoding="utf-8")
+            return atlas.review_work(self.root)["witness_search"]["t"]
+
+        self.assertEqual(plan()["mode"], "available")
+        work["witness_missing_result"] = "Existence of an interior differentiability point"
+        self.assertEqual(plan()["action"], "defer missing result")
+        self.assertEqual(plan()["missing_result"], work["witness_missing_result"])
+        self.project["witness_search"] = "skip"
+        self.assertEqual(plan()["action"], "skip search")
+        work["witness_search"] = "pursue"
+        self.assertEqual(plan()["action"], "pursue missing result")
+        del work["witness_search"]
+        self.assertEqual(plan()["action"], "skip search")
+        self.project["witness_search"] = "pursue"
+        self.assertEqual(plan()["action"], "pursue missing result")
+
+        receipt_path = self.root / "audit.json"
+        audit = json.loads(receipt_path.read_bytes())
+        audit["hypotheses"] = {"declaration": "example_holds", "proposition": "True", "axioms": []}
+        receipt_path.write_text(json.dumps(audit), encoding="utf-8")
+        saved = receipt_path.read_bytes()
+        self.project["witness_search"] = "skip"
+        self.assertEqual(plan(), {"mode": "skip", "action": "reuse checked witness"})
+        with redirect_stdout(io.StringIO()):
+            atlas.build(self.root)
+        self.assertEqual(receipt_path.read_bytes(), saved)
+        self.assertEqual(self.packet()["witness"]["declaration"], "example_holds")
+
     def test_optional_and_versioned_review(self):
         self.receipt({"Statement":"a"*64, "rate":"b"*64})
         self.compare()
