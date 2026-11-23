@@ -66,6 +66,53 @@ class StatementApproval(unittest.TestCase):
         record.update(updates)
         review.save_comparison(self.root,"t",record)
 
+    def test_default_assessments_follow_the_current_scan(self):
+        from review_web import render
+        self.compare()  # Existing comparison predates the scan.
+        path = self.root / "audit.json"
+        audit = json.loads(path.read_bytes())
+        use = dict(constant="constrainedRate", file="T.lean", lines=[1, 1])
+        audit["defaults"] = [dict(use, construct="Real.log"), dict(use, construct="InfSet.sInf")]
+        path.write_text(json.dumps(audit), encoding="utf-8")
+        packet = self.packet()
+        log_id, inf_id = [item["id"] for item in packet["defaults"]]
+        self.assertNotEqual(log_id, inf_id)
+        self.assertEqual(render(packet).count(b"<strong>not assessed</strong>"), 2)
+        analysis = packet["view"]["analysis"]
+        explained = dict(status="justified", explanation="The hypothesis 0 < p gives a positive argument.")
+        question = dict(status="needs attention", explanation="What ensures a nonempty set bounded below?")
+        saved = (self.root / "comparisons.json").read_bytes()
+        for invalid in ({}, {log_id: explained}, {log_id: explained, "obsolete": question},
+                        {log_id: explained, inf_id: dict(question, status="not assessed")},
+                        {log_id: explained, inf_id: dict(question, explanation=" ")}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                self.compare(analysis=dict(analysis, default_assessments=invalid))
+            self.assertEqual((self.root / "comparisons.json").read_bytes(), saved)
+        self.compare(analysis=dict(analysis, default_assessments={log_id: explained, inf_id: question}))
+        # Reordering and moving a definition do not detach its explanation.
+        audit["defaults"].reverse()
+        audit["defaults"][0]["lines"] = [2, 2]
+        path.write_text(json.dumps(audit), encoding="utf-8")
+        packet = self.packet()
+        self.assertTrue(packet["checked"])
+        with redirect_stdout(io.StringIO()):
+            atlas.build(self.root)
+        static = (self.root / "dist" / review.review_url("t")).read_text(encoding="utf-8")
+        local = render(packet, secret="local").decode()
+        for page in (static, local):
+            self.assertLess(page.index(question["explanation"]), page.index("How the statements compare"))
+            details = page.split("<details><summary>Show explained uses</summary>", 1)
+            self.assertIn(question["explanation"], details[0])
+            self.assertIn("InfSet.sInf", details[0])
+            self.assertIn("Real.log", details[1].split("</details>", 1)[0])
+            self.assertIn(atlas.esc(explained["explanation"]), details[1].split("</details>", 1)[0])
+        dashboard = (self.root / "dist/progress.html").read_text(encoding="utf-8")
+        self.assertIn("Lean checked", dashboard)
+        self.assertIn("1 of 1 stated results closed", dashboard)
+        audit["defaults"].append(dict(use, construct="Real.sqrt"))
+        path.write_text(json.dumps(audit), encoding="utf-8")
+        self.assertEqual(render(self.packet()).count(b"<strong>not assessed</strong>"), 1)
+
     def test_project_witness_search_and_claim_exception(self):
         path = self.root / "project.json"
         work = self.project["work"]["t"]

@@ -148,6 +148,54 @@ class AuditClosure(unittest.TestCase):
                         audit_lean.audit(args)
 
 
+    def test_default_value_uses_in_statement_definitions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pin = os.environ["ELAN_TOOLCHAIN"]
+            (root/"lean-toolchain").write_text(pin)
+            (root/"lakefile.toml").write_text('name = "Example"\n[[lean_lib]]\nname = "Pkg"\n')
+            (root/"Pkg").mkdir()
+            sources = {
+                "Pkg/Defs.lean": (
+                    "instance : Inv Nat := ⟨fun n => n⟩\n"
+                    "structure Matrix (n : Type) where val : Nat\n"
+                    "instance : Inv (Matrix Nat) := ⟨fun m => m⟩\n"
+                    "def gap (a b : Nat) : Nat := a - b\n"
+                    "def share (a n : Nat) : Nat := a / n + a⁻¹\n"
+                    "def invert (m : Matrix Nat) : Matrix Nat := m⁻¹\n"
+                    "-- Proofs are not followed: this subtraction is not part of the statement.\n"
+                    "theorem half_le (a : Nat) : a / 2 ≤ a := by\n  have := Nat.sub_le a 1; exact Nat.div_le_self a 2\n"
+                    "def half (a : Nat) : {m : Nat // m ≤ a} := ⟨a / 2, half_le a⟩\n"
+                    "def ratio (a b : Int) : Int := a / b - b\n"
+                    "def Statement : Prop :=\n  ∀ a b m, gap a b ≤ a ∧ (half a).1 ≤ share a 1 + a ∧ ratio a b = ratio a b ∧ invert m = m\n"),
+                "Pkg/Proof.lean": "import Pkg.Defs\ntheorem main : Statement := fun a b m => ⟨Nat.sub_le a b, by\n"
+                                  "  have := (half a).2; simp [share]; omega, rfl, rfl⟩\n",
+                "Contract.lean": "import Pkg.Defs\nimport Pkg.Proof\n",
+            }
+            for name, body in sources.items():
+                (root/name).write_text(body, encoding="utf-8")
+            env = os.environ.copy()
+            lake = audit_lean.select_lake(root, pin, env, sys.stderr, offline=True)
+            subprocess.run([*lake, "update"], cwd=root, env=env, check=True)
+            receipt = audit_lean.audit(SimpleNamespace(package=root, contract="Contract.lean", expected="Statement",
+                                                       declaration="main", target=["Pkg.Proof"]))
+            where = dict(file="Pkg/Defs.lean")
+            self.assertEqual(receipt["defaults"], [
+                dict(constant="gap", **where, lines=[4, 4], construct="HSub.hSub", type="Nat"),
+                dict(constant="invert", **where, lines=[6, 6], construct="Inv.inv", type="Matrix Nat"),
+                dict(constant="ratio", **where, lines=[11, 11], construct="HDiv.hDiv", type="Int"),
+                dict(constant="share", **where, lines=[5, 5], construct="HDiv.hDiv", type="Nat"),
+                dict(constant="share", **where, lines=[5, 5], construct="Inv.inv", type="Nat"),
+            ])
+            self.assertEqual(audit_lean.default_meaning(receipt["defaults"][0]), "a − b = 0 when b > a")
+            self.assertIn("singular matrix", audit_lean.default_meaning(receipt["defaults"][1]))
+            self.assertIn("⊤.toReal = 0", audit_lean.default_meaning({"construct": "ENNReal.toReal"}))
+            self.assertIn("x ≤ 0", audit_lean.default_meaning({"construct": "ENNReal.ofReal"}))
+            self.assertIn("not a unit", audit_lean.default_meaning({"construct": "Ring.inverse"}))
+            self.assertIn("not integrable", audit_lean.default_meaning({"construct": "MeasureTheory.condExp"}))
+            self.assertIn("not in the range", audit_lean.default_meaning({"construct": "Function.invFun"}))
+            self.assertNotIn("defaults", receipt["statement"])
+
     def test_statement_digest_follows_definitions_not_proofs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

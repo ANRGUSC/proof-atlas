@@ -205,6 +205,15 @@ def current_audit(root, cid, w):
     return audit
 
 
+def statement_defaults(audit):
+    """The receipt's default-value uses in the statement's definitions, each with its meaning."""
+    from audit_lean import default_meaning  # audit_lean imports atlas through check_lean
+    # The scanner groups uses by declaration, operation and type. Source lines may move.
+    return [dict(use, meaning=default_meaning(use),
+                 id=reviews.digest([use["constant"], use["construct"], use.get("type", "")]))
+            for use in (audit or {}).get("defaults", [])]
+
+
 def build_local(root):
     """Keep published evidence during local review when it matches the checkout."""
     import subprocess
@@ -370,6 +379,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         rd = reviews.packet(root,p,c,w,audit if checked else None,comparisons.get(cid),reviews.history(root,cid),checked)
         rd["page"] = entry.get("page")
         rd["sources"] = reviews.exact_sources(root,w,audit) if checked else []
+        entry["defaults"] = rd["defaults"]
         rd["witness"] = reviews.witness_source(root,w,audit) if checked else None
         review_entries.append(rd)
         atomic(output/reviews.review_url(cid),review_web.render(rd))
@@ -588,11 +598,13 @@ if __name__ == "__main__":
                 packet["paper"] = data["view"]["excerpt"]
             if args.side != "paper":
                 packet["lean"] = data["sources"]
+                packet["defaults"] = data["defaults"]
                 if data.get("witness"):
                     packet["witness"] = data["witness"]
             if not args.side:
                 packet["reported_differences"] = [e["id"] for e in data["events"] if e["decision"]=="difference"]
-            print(json.dumps(packet,ensure_ascii=False,indent=2))
+            # This JSON is piped to independent readers, including on Windows legacy code pages.
+            print(json.dumps(packet, indent=2))
         elif args.operation == "compare":
             if len(args.claims) != 1 or not args.readings:
                 raise ValueError("Supply one claim label and --readings FILE")

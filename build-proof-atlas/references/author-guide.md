@@ -16,6 +16,10 @@ Lean checked means Lean accepted the recorded formal declaration against its exp
 
 Say “Open the local review dashboard for this paper.” You can ask during proof generation or after returning to the project later. The agent starts or reopens the local browser server. Open any claim from the queue. For a direct launch, run `python <skill>/scripts/atlas.py review <project-folder>`. To share a terminal session without opening a browser automatically, add `--no-open`. The terminal alternative is `python <skill>/scripts/atlas.py approve <project-folder> --by "Your name"`. Add a claim label before --by to select just that theorem.
 
+## Why does the review flag some Lean operations?
+
+Lean assigns values to operations such as division by zero. On the review page, "needs attention" gives the specific fact the agent could not establish. For an infimum, for example, it might ask whether the set is nonempty and bounded below. Older findings without a saved explanation appear as "not assessed." Open "Show explained uses" to see the hypotheses, lemmas, or conventions that justify the other findings. The Lean view contains the full scan. An open question can accompany a completed comparison and a Lean-checked proof.
+
 ## How much work goes into finding examples?
 
 A witness is a Lean-checked example where a theorem’s hypotheses hold together. For example, if a conclusion applies at a point where a function is differentiable, the witness supplies such a point. You can inspect the example and the proposition it proves in the Lean view or on the claim’s review page.

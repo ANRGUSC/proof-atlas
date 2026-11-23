@@ -15,6 +15,8 @@ Proof Atlas is a skill for turning a mathematics paper into a website where read
 
 **How much work goes into examples?** A *witness* is a checked example where the theorem’s hypotheses hold together. By default the agent tries a concrete example or an existing lemma. If it needs a new lemma, it records what is missing and moves on. You can say “Skip witness searches for this paper,” “Pursue witnesses even when they need new lemmas,” or “Do the extra work for Theorem 8.” The atlas remembers your choice and keeps earlier checked examples. [Witnesses in the full author guide](build-proof-atlas/references/author-guide.md#how-much-work-goes-into-finding-examples)
 
+**Which Lean defaults need my attention?** The review page puts unresolved uses first. Open **Show explained uses** to see why other uses are justified, or go to the Lean view for the full scan. [Reading a flagged operation](build-proof-atlas/references/author-guide.md#why-does-the-review-flag-some-lean-operations)
+
 **When does the agent need me?** It asks when your intended mathematical meaning affects the work, such as whether a bound includes an endpoint. The planned pre-proof review will offer to resolve the question with you now or save it and continue independent claims. [Pre-proof review in the full author guide](build-proof-atlas/references/author-guide.md#what-if-my-intent-is-unclear-before-proof-work-begins)
 
 ![Local review example showing the paper and Lean readings above the author’s three choices.](docs/author-review.png)

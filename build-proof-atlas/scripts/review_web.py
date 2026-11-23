@@ -24,6 +24,33 @@ def document(title,body,base="../"):
             f'<main>{body}</main></body></html>').encode()
 
 
+def default_panel(findings, view):
+    from atlas import esc
+    if not findings:
+        return ""
+    assessments = view.get("analysis", {}).get("default_assessments", {})
+    groups = {"needs attention": [], "not assessed": [], "justified": []}
+    for finding in findings:
+        assessment = assessments.get(finding["id"], {})
+        status = assessment.get("status", "not assessed")
+        explanation = esc(assessment.get("explanation", ""))
+        typ = " on " + esc(finding["type"]) if finding.get("type") else ""
+        location = esc(finding["file"])
+        if finding.get("lines"):
+            location += f' L{esc(finding["lines"][0])}'
+        groups[status].append(
+            f'<li><strong>{esc(status)}</strong> {explanation}<br>'
+            f'<code>{esc(finding["construct"])}</code>{typ} in <code>{esc(finding["constant"])}</code> '
+            f'({location}) · {esc(finding["meaning"])}</li>')
+    parts = ['<section><h2>Lean default values</h2>']
+    unresolved = groups["needs attention"] + groups["not assessed"]
+    if unresolved:
+        parts.extend(['<ul>', *unresolved, '</ul>'])
+    if groups["justified"]:
+        parts.extend(['<details><summary>Show explained uses</summary><ul>', *groups["justified"], '</ul></details>'])
+    return "".join(parts) + "</section>"
+
+
 def render(data,secret=None,notice=""):
     from atlas import esc
     v=data["view"]
@@ -59,6 +86,7 @@ def render(data,secret=None,notice=""):
                 para(view["lean_refs"])+'</section></div>')
     body=f'<p>{esc(v["edition"])} · {cid}</p><h1>{esc(data["title"])}</h1>'
     body+=para(notice)+para(data["assessment"])
+    body+=default_panel(data.get("defaults", []), v)
     if data["stronger_result"]:
         body+='<aside id="scope-note"><h2>Lean proves more</h2>'+para(data["stronger_result"])+'</aside>'
     if data["author_scope"]:
@@ -106,7 +134,8 @@ def render(data,secret=None,notice=""):
         body+=(f'<details><summary>{esc(label)} · {esc(e["by"])} · {esc(e["at"])}</summary>'+para(e["comment"])+
                (para("Author’s scope note · "+e["scope_note"]) if e.get("scope_note") else "")+
                (para("Lean proves more · "+e["stronger_result_seen"]) if e.get("stronger_result_seen") else "")+
-               para(e["view"]["edition"])+analysis_panel(e["view"])+columns(e["view"])+sources(e.get("sources",[]))+'</details>')
+               para(e["view"]["edition"])+default_panel(e.get("defaults", []), e["view"])+
+               analysis_panel(e["view"])+columns(e["view"])+sources(e.get("sources",[]))+'</details>')
     return document(data["title"],body)
 
 
@@ -163,7 +192,8 @@ def serve(root,open_browser=True,port=0):
                         return self.reply(queue([get_packet(root,c) for c in ids.values()]))
                     if path in ids:
                         notice="Saved locally." if urlsplit(self.path).query=="saved" else ""
-                        return self.reply(render(get_packet(root,ids[path]),secret,notice))
+                        data=get_packet(root,ids[path])
+                        return self.reply(render(data,secret,notice))
                 except (ValueError,KeyError,OSError) as error:
                     return self.send_error(409,str(error))
             super().do_GET()
