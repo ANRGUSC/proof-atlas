@@ -55,7 +55,7 @@ class StatementApproval(unittest.TestCase):
     def packet(self):
         return review.get_packet(self.root,"t")
 
-    def compare(self, result="match", **updates):
+    def compare(self, result="match", default_assessments=None, **updates):
         record = dict(bindings=self.packet()["view"]["bindings"], result=result, paper_reading="For n=0 the rate is positive.",
                       lean_reading="The rate at zero exceeds zero.", paper_refs="paper.tex, theorem t", lean_refs="Statement and rate")
         record["analysis"] = dict(summary="Compare the rate at zero.", scope="Only n=0 is asserted.",
@@ -63,8 +63,90 @@ class StatementApproval(unittest.TestCase):
                                   advice="Check the value at zero.")
         if result != "match":
             record["analysis"]["suggested_feedback"] = "Please clarify the domain at zero."
+        if default_assessments is not None:
+            record["analysis"]["default_assessments"] = default_assessments
         record.update(updates)
         review.save_comparison(self.root,"t",record)
+
+    def test_default_assessments_follow_the_current_scan(self):
+        from review_web import render
+        self.compare()  # Existing comparison predates the scan.
+        path = self.root / "audit.json"
+        audit = json.loads(path.read_bytes())
+        use = dict(constant="constrainedRate", file="T.lean", lines=[1, 1])
+        audit["defaults"] = [dict(use, construct="Real.log"), dict(use, construct="InfSet.sInf")]
+        path.write_text(json.dumps(audit), encoding="utf-8")
+        packet = self.packet()
+        log_id, inf_id = [item["id"] for item in packet["defaults"]]
+        self.assertNotEqual(log_id, inf_id)
+        self.assertEqual(render(packet).count(b"<strong>not assessed</strong>"), 2)
+        analysis = packet["view"]["analysis"]
+        explained = dict(status="justified", explanation="The hypothesis 0 < p gives a positive argument.")
+        question = dict(status="needs attention", explanation="What ensures a nonempty set bounded below?")
+        saved = (self.root / "comparisons.json").read_bytes()
+        for invalid in ({}, {log_id: explained}, {log_id: explained, "obsolete": question},
+                        {log_id: explained, inf_id: dict(question, status="not assessed")},
+                        {log_id: explained, inf_id: dict(question, explanation=" ")}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                self.compare(analysis=dict(analysis, default_assessments=invalid))
+            self.assertEqual((self.root / "comparisons.json").read_bytes(), saved)
+        self.compare(analysis=dict(analysis, default_assessments={log_id: explained, inf_id: question}))
+        # Reordering and moving a definition do not detach its explanation.
+        audit["defaults"].reverse()
+        audit["defaults"][0]["lines"] = [2, 2]
+        path.write_text(json.dumps(audit), encoding="utf-8")
+        packet = self.packet()
+        self.assertTrue(packet["checked"])
+        with redirect_stdout(io.StringIO()):
+            atlas.build(self.root)
+        static = (self.root / "dist" / review.review_url("t")).read_text(encoding="utf-8")
+        local = render(packet, secret="local").decode()
+        for page in (static, local):
+            self.assertLess(page.index(question["explanation"]), page.index("How the statements compare"))
+            details = page.split("<details><summary>Show explained uses</summary>", 1)
+            self.assertIn(question["explanation"], details[0])
+            self.assertIn("InfSet.sInf", details[0])
+            self.assertIn("Real.log", details[1].split("</details>", 1)[0])
+            self.assertIn(atlas.esc(explained["explanation"]), details[1].split("</details>", 1)[0])
+        dashboard = (self.root / "dist/progress.html").read_text(encoding="utf-8")
+        self.assertIn("Lean checked", dashboard)
+        self.assertIn("1 of 1 stated results closed", dashboard)
+        audit["defaults"].append(dict(use, construct="Real.sqrt"))
+        path.write_text(json.dumps(audit), encoding="utf-8")
+        self.assertEqual(render(self.packet()).count(b"<strong>not assessed</strong>"), 1)
+
+    def test_project_witness_search_and_claim_exception(self):
+        path = self.root / "project.json"
+        work = self.project["work"]["t"]
+
+        def plan():
+            path.write_text(json.dumps(self.project), encoding="utf-8")
+            return atlas.review_work(self.root)["witness_search"]["t"]
+
+        self.assertEqual(plan()["mode"], "available")
+        work["witness_missing_result"] = "Existence of an interior differentiability point"
+        self.assertEqual(plan()["action"], "defer missing result")
+        self.assertEqual(plan()["missing_result"], work["witness_missing_result"])
+        self.project["witness_search"] = "skip"
+        self.assertEqual(plan()["action"], "skip search")
+        work["witness_search"] = "pursue"
+        self.assertEqual(plan()["action"], "pursue missing result")
+        del work["witness_search"]
+        self.assertEqual(plan()["action"], "skip search")
+        self.project["witness_search"] = "pursue"
+        self.assertEqual(plan()["action"], "pursue missing result")
+
+        receipt_path = self.root / "audit.json"
+        audit = json.loads(receipt_path.read_bytes())
+        audit["hypotheses"] = {"declaration": "example_holds", "proposition": "True", "axioms": []}
+        receipt_path.write_text(json.dumps(audit), encoding="utf-8")
+        saved = receipt_path.read_bytes()
+        self.project["witness_search"] = "skip"
+        self.assertEqual(plan(), {"mode": "skip", "action": "reuse checked witness"})
+        with redirect_stdout(io.StringIO()):
+            atlas.build(self.root)
+        self.assertEqual(receipt_path.read_bytes(), saved)
+        self.assertEqual(self.packet()["witness"]["declaration"], "example_holds")
 
     def test_optional_and_versioned_review(self):
         self.receipt({"Statement":"a"*64, "rate":"b"*64})
@@ -313,14 +395,19 @@ class StatementApproval(unittest.TestCase):
         self.assertEqual(lean_side["defaults"][0]["construct"], "HSub.hSub")
         self.assertEqual(lean_side["witness"]["declaration"], "ex")
 
-        # Gate 1 author ambiguity surfaces under author_questions so the agent can pause and skip.
-        self.compare("unsure", issue="Endpoint ambiguous", actor="Author", next="Confirm whether n=0 is included.")
+        # The question is saved for immediate discussion or later review.
+        flag = lean_side["defaults"][0]["id"]
+        assessments = {flag: {"status": "justified", "explanation": "The definition uses truncated natural subtraction."}}
+        with self.assertRaisesRegex(ValueError, "one assessment"):
+            self.compare("unsure", issue="Endpoint ambiguous", actor="Author", next="Confirm whether n=0 is included.")
+        self.compare("unsure", default_assessments=assessments, issue="Endpoint ambiguous",
+                     actor="Author", next="Confirm whether n=0 is included.")
         work_report = atlas.review_work(self.root)
         self.assertFalse(work_report["agent_tasks"])
         self.assertEqual(work_report["author_questions"][0]["issue"], "Endpoint ambiguous")
 
         # Once Gate 1 matches, the review page labels it "Statement drafted (proof in progress)" and supports pre-approval.
-        self.compare("match", resolution="Author confirmed n=0 is included.")
+        self.compare("match", default_assessments=assessments, resolution="Author confirmed n=0 is included.")
         pkt = self.packet()
         self.assertTrue(pkt["statement_checked"])
         self.assertFalse(pkt["checked"])

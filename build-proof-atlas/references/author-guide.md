@@ -16,9 +16,35 @@ Lean checked means Lean accepted the recorded formal declaration against its exp
 
 Say “Open the local review dashboard for this paper.” You can ask during proof generation or after returning to the project later. The agent starts or reopens the local browser server. Open any claim from the queue. For a direct launch, run `python <skill>/scripts/atlas.py review <project-folder>`. To share a terminal session without opening a browser automatically, add `--no-open`. The terminal alternative is `python <skill>/scripts/atlas.py approve <project-folder> --by "Your name"`. Add a claim label before --by to select just that theorem.
 
+## Why does the review flag some Lean operations?
+
+Lean assigns values to operations such as division by zero. A flag tells you where a definition uses such an operation. In each new comparison, the agent records a status and a short explanation for every finding in the current scan.
+
+Start with “needs attention.” For example, if a rate is defined by taking an infimum, the review might ask, “What guarantees that the set in `constrainedRate` is nonempty and bounded below?” If you know the relevant lemma or intended convention, you can identify it in your feedback. The agent can save the comparison with the question open, and the theorem keeps its Lean proof status.
+
+Open “Show explained uses” to see the findings marked “justified.” Each explanation names the hypothesis, lemma, or intended convention that accounts for the operation. The Lean view shows the full scan. When an older comparison says “not assessed,” you can ask, “Update this claim’s comparison and explain its flagged operations.” For an atlas whose audit predates the scan itself, ask the agent to refresh the audit first.
+
+## How much work goes into finding examples?
+
+A witness is a Lean-checked example where a theorem’s hypotheses hold together. For example, if a conclusion applies at a point where a function is differentiable, the witness supplies such a point. You can inspect the example and the proposition it proves in the Lean view or on the claim’s review page.
+
+There is no setup question. By default the agent tries a concrete example or an existing lemma. If a new mathematical result is needed, it records the missing statement with the claim and continues with independent work. A theorem can still be marked “Lean checked” while its dashboard row says “No checked example shows the hypotheses can hold.”
+
+To change the effort for the whole paper, say “Skip witness searches for this paper” or “Pursue witnesses even when they need new lemmas.” To make one exception, say “Do the extra work for Theorem 8.” To undo that exception, say “Use the paper’s usual witness policy for Theorem 8 again.” The atlas saves your preference across sessions. Earlier checked examples remain available and are checked again when their claims are re-audited.
+
+## What if my intent is unclear before proof work begins?
+
+The agent compares the paper passage with the proposed Lean statement before starting the proof. Your approval is optional. If the two readings differ in a way that needs your judgment, the agent shows them side by side and asks a specific question, such as “Does the identity include the endpoint?”
+
+Choose “Work through this now” to settle the interpretation together, or “Save the question and continue with independent claims” to return to it later. When you are away, the agent uses the second option. The question stays in the review queue. The affected claim and any claims that depend on the answer wait. The agent revisits outstanding questions before its final summary.
+
+During proof work, the queue can show “Statement drafted (proof in progress)” or “Statement approved (proof in progress).” If you approve the statement at this stage, that approval carries over when the proof closes against the same statement and comparison. A change to the formal statement calls for a fresh comparison.
+
 ## What am I being asked to decide?
 
-Each checked comparison opens with **How the statements compare**. Its rows explain why the paper and the formal theorem agree or differ on each important case. Read **Scope of the conclusion** and **Agent recommendation** for the decision the evidence supports. When an assumption or endpoint is in doubt, the agent supplies wording you can use or edit when reporting the difference. You can disagree with the recommendation. Only your explicit decision records an author review.
+In “How the statements compare,” each row explains how the formal theorem relates to one case in the paper. For a classified comparison, the dashboard’s difference count links to the cases in the Paper view. For example, “other form” can mean the same bound uses a different index, while “restriction” means the Lean statement covers a narrower domain. Older comparisons say “not classified” until their cases are labeled.
+
+Read “Scope of the conclusion” and “Agent recommendation” before deciding. When an assumption or endpoint is in doubt, the agent supplies wording you can use or edit when reporting the difference. Only your explicit decision records an author review.
 
 Read the paper passage and the mathematical interpretation under What Lean proved. Compare the objects, assumptions, ranges, and conclusions. Expand a definition or open the paper PDF and exact Lean evidence if helpful. Select Yes, these match to approve. Select I see a difference and describe it in your own words to flag a discrepancy or ask a question. Skip for now leaves the decision open. An author may review as many or as few claims as they wish.
 

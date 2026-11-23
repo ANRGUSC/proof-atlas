@@ -67,6 +67,8 @@ def history(root, cid):
 
 
 def packet(root, project, claim, work, audit, comparison, events, checked, statement_checked=False):
+    from atlas import statement_defaults
+    defaults = statement_defaults(audit) if checked or statement_checked else []
     keys = bindings(project, claim, audit)
     has_statement = bool((checked or statement_checked) and keys["statement"])
     current = comparison and comparison.get("bindings") == keys and has_statement
@@ -124,7 +126,7 @@ def packet(root, project, claim, work, audit, comparison, events, checked, state
     else:
         issue, actor, step = "", "Author (optional)", "Review the comparison whenever convenient."
     return dict(id=claim["id"], title=claim["title"], view=view, version=version,
-                token=digest([version, comparison, last.get("id"), checked, bool(statement_checked)]), events=events,
+                token=digest([version, comparison, last.get("id"), checked, bool(statement_checked), defaults]), events=events, defaults=defaults,
                 checked=checked, statement_checked=bool(checked or statement_checked),
                 approved=approved, preapproved=preapproved, disputed=disputed,
                 ready=bool("analysis" in view and comp.get("result")=="match" and not disputed),
@@ -234,6 +236,8 @@ def decide(root,cid,token,decision,by,comment="",paper_edit="",scope_note=""):
             raise ValueError("Approval requires a current checked comparison with no outstanding difference.")
         event = dict(by=by.strip(), decision=decision, comment=comment.strip(), version=data["version"],
                      at=datetime.now(timezone.utc).isoformat(), view=data["view"], sources=data["sources"])
+        if data["defaults"]:
+            event["defaults"] = data["defaults"]
         if paper_edit.strip():
             event["paper_edit"] = paper_edit.strip()
         if scope_note.strip():
@@ -263,6 +267,14 @@ def save_comparison(root,cid,record):
         if result not in ("match","difference","unsure"):
             raise ValueError("Choose match, difference or unsure")
         validate_analysis(record.get("analysis"), result, require_kinds=True)
+        assessments = record["analysis"].get("default_assessments", {})
+        expected_ids = {finding["id"] for finding in data["defaults"]}
+        if not isinstance(assessments, dict) or set(assessments) != expected_ids:
+            raise ValueError("Supply one assessment for each current default-value finding, keyed by its id")
+        for finding_id, assessment in assessments.items():
+            if (not isinstance(assessment, dict) or assessment.get("status") not in ("justified", "needs attention")
+                    or not isinstance(assessment.get("explanation"), str) or not assessment["explanation"].strip()):
+                raise ValueError(f"{finding_id}: give a status (justified or needs attention) and a short explanation")
         if "stronger_result" in record and (result!="match" or
                 not isinstance(record["stronger_result"],str) or not record["stronger_result"].strip()):
             raise ValueError("Use a stronger-result note only for a match and describe the extra conclusion")
@@ -298,6 +310,11 @@ def terminal(root,labels,by,ask=input):
         if data["author_scope"]:
             print("Author's scope note",data["author_scope"],sep="\n")
         view=data["view"]
+        assessments = view.get("analysis", {}).get("default_assessments", {})
+        for finding in data["defaults"]:
+            assessment = assessments.get(finding["id"], {})
+            print(f'{finding["constant"]} · {finding["construct"]} · {assessment.get("status", "not assessed")}',
+                  assessment.get("explanation", ""), sep="\n")
         if analysis := view.get("analysis"):
             print("Agent analysis", analysis["summary"], sep="\n")
             for row in analysis["cases"]:

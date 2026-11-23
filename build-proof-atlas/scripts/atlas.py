@@ -230,16 +230,10 @@ def current_statement_audit(root, cid, w):
 def statement_defaults(audit):
     """The receipt's default-value uses in the statement's definitions, each with its meaning."""
     from audit_lean import default_meaning  # audit_lean imports atlas through check_lean
-    return [dict(use, meaning=default_meaning(use)) for use in (audit or {}).get("defaults", [])]
-
-
-def checked_defaults(root, cid):
-    work = reviews.read(root/"project.json", {}).get("work", {}).get(cid, {})
-    try:
-        audit, _ = current_statement_audit(root, cid, work)
-        return statement_defaults(audit)
-    except ValueError:
-        return []
+    # The scanner groups uses by declaration, operation and type. Source lines may move.
+    return [dict(use, meaning=default_meaning(use),
+                 id=reviews.digest([use["constant"], use["construct"], use.get("type", "")]))
+            for use in (audit or {}).get("defaults", [])]
 
 
 def build_local(root):
@@ -261,6 +255,25 @@ def build_local(root):
     return build(root, **options)
 
 
+def witness_plan(project, work, witness):
+    mode = work.get("witness_search", project.get("witness_search", "available"))
+    if mode not in ("available", "skip", "pursue"):
+        raise ValueError("witness_search must be available, skip, or pursue")
+    missing = work.get("witness_missing_result")
+    if witness:
+        action = "reuse checked witness"
+    elif mode == "skip":
+        action = "skip search"
+    elif missing:
+        action = "pursue missing result" if mode == "pursue" else "defer missing result"
+    else:
+        action = "try a concrete example or existing lemma"
+    plan = {"mode": mode, "action": action}
+    if missing and not witness:
+        plan["missing_result"] = missing
+    return plan
+
+
 def review_work(root, labels=(), *, require_ci=False, ci_receipt=None):
     """List actionable review findings. Optional approvals are never obligations."""
     import subprocess
@@ -270,7 +283,7 @@ def review_work(root, labels=(), *, require_ci=False, ci_receipt=None):
         raise ValueError("Unknown review-work claim")
     selected = list(dict.fromkeys(labels or claims))
     report = {"scope": project.get("proof_work"), "agent_tasks": [], "author_questions": [],
-              "uncommitted_delivery_files": [], "ci_pending": []}
+              "uncommitted_delivery_files": [], "ci_pending": [], "witness_search": {}}
     ci = None
     if require_ci:
         if project.get("hosting", {}).get("lean_ci") != "enabled":
@@ -291,6 +304,8 @@ def review_work(root, labels=(), *, require_ci=False, ci_receipt=None):
     for cid in selected:
         work = project.get("work", {}).get(cid, {})
         packet = reviews.get_packet(root,cid)
+        if claims[cid]["kind"] != "conjecture":
+            report["witness_search"][cid] = witness_plan(project, work, packet["witness"])
         needs_gate1_review = (work.get("status") != "closed" and packet["statement_checked"]
                               and not packet["disputed"] and "analysis" not in packet["view"])
         if packet["disputed"] or (work.get("status")=="closed" and packet["actor"]=="Proof agent") or needs_gate1_review:
@@ -399,7 +414,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         rd["page"] = entry.get("page")
         rd["sources"] = reviews.exact_sources(root,w,active_audit) if active_audit else []
         rd["witness"] = reviews.witness_source(root,w,active_audit) if active_audit else None
-        rd["defaults"] = entry["defaults"] = statement_defaults(active_audit)
+        entry["defaults"] = rd["defaults"]
         review_entries.append(rd)
         atomic(output/reviews.review_url(cid),review_web.render(rd))
         entry["status"] = "correspondence under review" if rd["disputed"] else status
@@ -620,12 +635,13 @@ if __name__ == "__main__":
                 packet["paper"] = data["view"]["excerpt"]
             if args.side != "paper":
                 packet["lean"] = data["sources"]
+                packet["defaults"] = data["defaults"]
                 if data.get("witness"):
                     packet["witness"] = data["witness"]
-                packet["defaults"] = checked_defaults(args.project.resolve(),args.claims[0])
             if not args.side:
                 packet["reported_differences"] = [e["id"] for e in data["events"] if e["decision"]=="difference"]
-            print(json.dumps(packet,ensure_ascii=False,indent=2))
+            # This JSON is piped to independent readers, including on Windows legacy code pages.
+            print(json.dumps(packet, indent=2))
         elif args.operation == "compare":
             if len(args.claims) != 1 or not args.readings:
                 raise ValueError("Supply one claim label and --readings FILE")

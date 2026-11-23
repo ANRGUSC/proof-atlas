@@ -97,7 +97,7 @@ class DashboardCompletion(unittest.TestCase):
             dashboard()
             reader = (root / "dist/proofs/index.html").read_text(encoding="utf-8")
             self.assertIn('"defaults": [{"constant": "gap", "file": "T.lean", "lines": [1, 1], "construct": "HSub.hSub", '
-                          '"type": "ℕ", "meaning": "a − b = 0 when b > a"}]', reader)
+                          '"type": "ℕ", "meaning": "a − b = 0 when b > a", "id":', reader)
             review = (root/"dist"/atlas.reviews.review_url("t")).read_text(encoding="utf-8")
             self.assertIn("<code>HSub.hSub</code> on ℕ in <code>gap</code> (T.lean L1) · a − b = 0 when b &gt; a", review)
 
