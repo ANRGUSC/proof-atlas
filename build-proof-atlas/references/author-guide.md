@@ -18,7 +18,17 @@ Say “Open the local review dashboard for this paper.” You can ask during pro
 
 ## How much work goes into finding examples?
 
-By default the agent tries a concrete example or an existing lemma to show that a theorem's hypotheses can hold together. If a new result is needed, the agent records what is missing and continues with independent claims. You can say “Skip witness searches for this paper” or “Pursue witnesses even when they need new lemmas.” A request such as “Do the extra work for Theorem 8” applies just to that theorem. The atlas remembers your choice across sessions and keeps previously checked examples.
+A witness is a Lean-checked example where a theorem’s hypotheses hold together. For example, if a conclusion applies at a point where a function is differentiable, the witness supplies such a point. You can inspect the example and the proposition it proves in the Lean view or on the claim’s review page.
+
+There is no setup question. By default the agent tries a concrete example or an existing lemma. If a new mathematical result is needed, it records the missing statement with the claim and continues with independent work. A theorem can still be marked “Lean checked” while its dashboard row says “No checked example shows the hypotheses can hold.”
+
+To change the effort for the whole paper, say “Skip witness searches for this paper” or “Pursue witnesses even when they need new lemmas.” To make one exception, say “Do the extra work for Theorem 8.” To undo that exception, say “Use the paper’s usual witness policy for Theorem 8 again.” The atlas saves your preference across sessions. Earlier checked examples remain available and are checked again when their claims are re-audited.
+
+## What if my intent is unclear before proof work begins?
+
+The agreed pre-proof review workflow is planned for a future release. The agent will compare the paper passage with the proposed Lean statement before starting the proof. Human approval will be optional. If the two readings differ in a way that needs your judgment, the agent will show them side by side and ask a specific question, such as “Does the identity include the endpoint?”
+
+Choose “Work through this now” to settle the interpretation together, or “Save the question and continue with independent claims” to return to it later. When you are away, the agent will use the second option. The question will stay in the review queue, the affected claim and any claims that depend on the answer will wait, and the agent will revisit outstanding questions before its final summary.
 
 ## What am I being asked to decide?
 
