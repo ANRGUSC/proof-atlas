@@ -18,7 +18,11 @@ Say “Open the local review dashboard for this paper.” You can ask during pro
 
 ## Why does the review flag some Lean operations?
 
-Lean assigns values to operations such as division by zero. On the review page, "needs attention" gives the specific fact the agent could not establish. For an infimum, for example, it might ask whether the set is nonempty and bounded below. Older findings without a saved explanation appear as "not assessed." Open "Show explained uses" to see the hypotheses, lemmas, or conventions that justify the other findings. The Lean view contains the full scan. An open question can accompany a completed comparison and a Lean-checked proof.
+Lean assigns values to operations such as division by zero. A flag tells you where a definition uses such an operation. In each new comparison, the agent records a status and a short explanation for every finding in the current scan.
+
+Start with “needs attention.” For example, if a rate is defined by taking an infimum, the review might ask, “What guarantees that the set in `constrainedRate` is nonempty and bounded below?” If you know the relevant lemma or intended convention, you can identify it in your feedback. The agent can save the comparison with the question open, and the theorem keeps its Lean proof status.
+
+Open “Show explained uses” to see the findings marked “justified.” Each explanation names the hypothesis, lemma, or intended convention that accounts for the operation. The Lean view shows the full scan. When an older comparison says “not assessed,” you can ask, “Update this claim’s comparison and explain its flagged operations.” For an atlas whose audit predates the scan itself, ask the agent to refresh the audit first.
 
 ## How much work goes into finding examples?
 
@@ -36,7 +40,9 @@ Choose “Work through this now” to settle the interpretation together, or “
 
 ## What am I being asked to decide?
 
-Each checked comparison opens with **How the statements compare**. Its rows explain why the paper and the formal theorem agree or differ on each important case. Read **Scope of the conclusion** and **Agent recommendation** for the decision the evidence supports. When an assumption or endpoint is in doubt, the agent supplies wording you can use or edit when reporting the difference. You can disagree with the recommendation. Only your explicit decision records an author review.
+In “How the statements compare,” each row explains how the formal theorem relates to one case in the paper. For a classified comparison, the dashboard’s difference count links to the cases in the Paper view. For example, “other form” can mean the same bound uses a different index, while “restriction” means the Lean statement covers a narrower domain. Older comparisons say “not classified” until their cases are labeled.
+
+Read “Scope of the conclusion” and “Agent recommendation” before deciding. When an assumption or endpoint is in doubt, the agent supplies wording you can use or edit when reporting the difference. Only your explicit decision records an author review.
 
 Read the paper passage and the mathematical interpretation under What Lean proved. Compare the objects, assumptions, ranges, and conclusions. Expand a definition or open the paper PDF and exact Lean evidence if helpful. Select Yes, these match to approve. Select I see a difference and describe it in your own words to flag a discrepancy or ask a question. Skip for now leaves the decision open. An author may review as many or as few claims as they wish.
 
