@@ -24,6 +24,33 @@ def document(title,body,base="../"):
             f'<main>{body}</main></body></html>').encode()
 
 
+def default_panel(findings, view):
+    from atlas import esc
+    if not findings:
+        return ""
+    assessments = view.get("analysis", {}).get("default_assessments", {})
+    groups = {"needs attention": [], "not assessed": [], "justified": []}
+    for finding in findings:
+        assessment = assessments.get(finding["id"], {})
+        status = assessment.get("status", "not assessed")
+        explanation = esc(assessment.get("explanation", ""))
+        typ = " on " + esc(finding["type"]) if finding.get("type") else ""
+        location = esc(finding["file"])
+        if finding.get("lines"):
+            location += f' L{esc(finding["lines"][0])}'
+        groups[status].append(
+            f'<li><strong>{esc(status)}</strong> {explanation}<br>'
+            f'<code>{esc(finding["construct"])}</code>{typ} in <code>{esc(finding["constant"])}</code> '
+            f'({location}) · {esc(finding["meaning"])}</li>')
+    parts = ['<section><h2>Lean default values</h2>']
+    unresolved = groups["needs attention"] + groups["not assessed"]
+    if unresolved:
+        parts.extend(['<ul>', *unresolved, '</ul>'])
+    if groups["justified"]:
+        parts.extend(['<details><summary>Show explained uses</summary><ul>', *groups["justified"], '</ul></details>'])
+    return "".join(parts) + "</section>"
+
+
 def render(data,secret=None,notice=""):
     from atlas import esc
     v=data["view"]
@@ -59,6 +86,7 @@ def render(data,secret=None,notice=""):
                 para(view["lean_refs"])+'</section></div>')
     body=f'<p>{esc(v["edition"])} · {cid}</p><h1>{esc(data["title"])}</h1>'
     body+=para(notice)+para(data["assessment"])
+    body+=default_panel(data.get("defaults", []), v)
     if data["stronger_result"]:
         body+='<aside id="scope-note"><h2>Lean proves more</h2>'+para(data["stronger_result"])+'</aside>'
     if data["author_scope"]:
@@ -76,14 +104,12 @@ def render(data,secret=None,notice=""):
            '?view=lean">Lean source and verification evidence</a></p>')
     if data["sources"]:
         body+='<details><summary>Inspect the exact Lean statement and definitions</summary>'+sources(data["sources"])+'</details>'
-    if data.get("defaults"):
-        # Lean makes every function total; the comparison should account for each use.
-        body+=('<section id="defaults"><h2>Lean default values in these definitions</h2><p>Lean gives these operations a value '
-               'even where the mathematics leaves them undefined. The comparison should say, for each, why the default cannot '
-               'arise under the hypotheses, or what it means if it does.</p><ul>'+
-               "".join(f'<li><code>{esc(d["construct"])}</code>{" on "+esc(d["type"]) if d.get("type") else ""} in '
-                       f'<code>{esc(d["constant"])}</code> ({esc(d["file"])}{" L"+str(d["lines"][0]) if d.get("lines") else ""})'
-                       f' · {esc(d["meaning"])}</li>' for d in data["defaults"])+'</ul></section>')
+    if data.get("witness"):
+        w = data["witness"]
+        loc = f' · {esc(w["file"])} L{w["lines"][0]}' if w.get("file") and w.get("lines") else ""
+        snippet = f'<pre>{esc(w["text"])}</pre>' if w.get("text") else ""
+        body+=(f'<details><summary>Inspect the checked hypotheses example · {esc(w["declaration"])}{loc}</summary>'
+               f'<p>Proves: <code>{esc(w["proposition"])}</code></p>{snippet}</details>')
     body+=para(data["issue"])+para(data["resolution"])
     body+='<p><strong>Next action · '+esc(data["actor"])+'</strong><br>'+esc(data["next"])+'</p>'
     if secret:
@@ -108,7 +134,8 @@ def render(data,secret=None,notice=""):
         body+=(f'<details><summary>{esc(label)} · {esc(e["by"])} · {esc(e["at"])}</summary>'+para(e["comment"])+
                (para("Author’s scope note · "+e["scope_note"]) if e.get("scope_note") else "")+
                (para("Lean proves more · "+e["stronger_result_seen"]) if e.get("stronger_result_seen") else "")+
-               para(e["view"]["edition"])+analysis_panel(e["view"])+columns(e["view"])+sources(e.get("sources",[]))+'</details>')
+               para(e["view"]["edition"])+default_panel(e.get("defaults", []), e["view"])+
+               analysis_panel(e["view"])+columns(e["view"])+sources(e.get("sources",[]))+'</details>')
     return document(data["title"],body)
 
 
@@ -122,7 +149,7 @@ def queue(entries):
 
 
 def serve(root,open_browser=True,port=0):
-    from atlas import atomic, build_local, checked_defaults, manuscript_claims
+    from atlas import atomic, build_local, manuscript_claims
     root=root.resolve()
     key=digest(str(root))
     session=Path(tempfile.gettempdir())/("proof-atlas-review-"+key+".json")
@@ -166,7 +193,6 @@ def serve(root,open_browser=True,port=0):
                     if path in ids:
                         notice="Saved locally." if urlsplit(self.path).query=="saved" else ""
                         data=get_packet(root,ids[path])
-                        data["defaults"]=checked_defaults(root,ids[path])
                         return self.reply(render(data,secret,notice))
                 except (ValueError,KeyError,OSError) as error:
                     return self.send_error(409,str(error))
