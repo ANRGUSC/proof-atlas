@@ -299,6 +299,57 @@ class AuditClosure(unittest.TestCase):
                 err.seek(0)
                 self.assertIn("no --witness was given", err.read())
 
+    def test_statement_only_audit_locks_spec_before_proof(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pin = os.environ["ELAN_TOOLCHAIN"]
+            (root/"lean-toolchain").write_text(pin)
+            (root/"lakefile.toml").write_text('name = "Example"\n[[lean_lib]]\nname = "Statements"\n'
+                                              '[[lean_lib]]\nname = "Proofs"\n[[lean_lib]]\nname = "Examples"\n')
+            for folder in ("Statements", "Proofs", "Examples"):
+                (root/folder).mkdir()
+            sources = {
+                "Statements/Main.lean": "def gap (a b : Nat) : Nat := a - b\n"
+                                        "def Statement : Prop := ∀ n : Nat, 0 < n → gap n 1 < n\n",
+                # Deliberately broken Proofs/Main.lean proves Gate 1 never builds Proofs/.
+                "Proofs/Main.lean": "import Statements.Main\ntheorem main : Statement := DOES_NOT_COMPILE\n",
+                "Examples/Main.lean": "import Statements.Main\ntheorem nonempty : ∃ n : Nat, 0 < n := ⟨1, by decide⟩\n",
+                "StatementContract.lean": "import Statements.Main\nimport Examples.Main\n",
+                "Contract.lean": "import Statements.Main\nimport Proofs.Main\nimport Examples.Main\n",
+            }
+            for name, body in sources.items():
+                (root/name).write_text(body, encoding="utf-8")
+            env = os.environ.copy()
+            lake = audit_lean.select_lake(root, pin, env, sys.stderr, offline=True)
+            subprocess.run([*lake, "update"], cwd=root, env=env, check=True)
+
+            stmt = audit_lean.audit(SimpleNamespace(
+                package=root, contract="StatementContract.lean", expected="Statement",
+                statements=["Statements"], witness="nonempty", statement_only=True))
+            self.assertTrue(stmt["statement_only"])
+            self.assertNotIn("declaration", stmt)
+            self.assertEqual(stmt["hypotheses"]["declaration"], "nonempty")
+            self.assertEqual(stmt["hypotheses"]["file"], "Examples/Main.lean")
+            self.assertEqual([d["construct"] for d in stmt["defaults"]], ["HSub.hSub"])
+            self.assertNotIn("Proofs/Main.lean", stmt["checked_inputs"])
+
+            # Validation errors for incompatible CLI combinations.
+            with self.assertRaisesRegex(ValueError, "--statement-only requires --statements"):
+                audit_lean.audit(SimpleNamespace(package=root, contract="StatementContract.lean",
+                                                 expected="Statement", statement_only=True))
+            with self.assertRaisesRegex(ValueError, "does not accept a proof declaration"):
+                audit_lean.audit(SimpleNamespace(package=root, contract="StatementContract.lean",
+                                                 expected="Statement", declaration="main",
+                                                 statements=["Statements"], statement_only=True))
+
+            # Once Proofs/Main.lean compiles without changing Statements/, statement.sha256 matches identically.
+            (root/"Proofs/Main.lean").write_text(
+                "import Statements.Main\ntheorem main : Statement := fun n h => by unfold gap; omega\n", encoding="utf-8")
+            closed = audit_lean.audit(SimpleNamespace(
+                package=root, contract="Contract.lean", expected="Statement", declaration="main",
+                target=["Proofs.Main"], statements=["Statements"], witness="nonempty"))
+            self.assertEqual(stmt["statement"]["sha256"], closed["statement"]["sha256"])
+
 
 if __name__ == "__main__":
     unittest.main()

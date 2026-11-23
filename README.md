@@ -17,7 +17,7 @@ Proof Atlas is a skill for turning a mathematics paper into a website where read
 
 **Which Lean defaults need my attention?** Open a claim’s review page and start with **needs attention**. Each item names a fact the agent still needs to establish. The agent accounts for every flagged use before saving a new comparison. Open **Show explained uses** for the justifications, or switch to the Lean view for the full scan. [Reading a flagged operation](build-proof-atlas/references/author-guide.md#why-does-the-review-flag-some-lean-operations)
 
-**When does the agent need me?** It asks when your intended mathematical meaning affects the work, such as whether a bound includes an endpoint. The planned pre-proof review will offer to resolve the question with you now or save it and continue independent claims. [Pre-proof review in the full author guide](build-proof-atlas/references/author-guide.md#what-if-my-intent-is-unclear-before-proof-work-begins)
+**When does the agent need me?** It asks when your intended mathematical meaning affects the work, such as whether a bound includes an endpoint. During pre-proof review, the agent offers to resolve the question with you now or save it and continue independent claims. [Pre-proof review in the full author guide](build-proof-atlas/references/author-guide.md#what-if-my-intent-is-unclear-before-proof-work-begins)
 
 ![Local review example showing the paper and Lean readings above the author’s three choices.](docs/author-review.png)
 

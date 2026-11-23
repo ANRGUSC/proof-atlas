@@ -34,9 +34,11 @@ To change the effort for the whole paper, say “Skip witness searches for this 
 
 ## What if my intent is unclear before proof work begins?
 
-The agreed pre-proof review workflow is planned for a future release. The agent will compare the paper passage with the proposed Lean statement before starting the proof. Human approval will be optional. If the two readings differ in a way that needs your judgment, the agent will show them side by side and ask a specific question, such as “Does the identity include the endpoint?”
+The agent compares the paper passage with the proposed Lean statement before starting the proof. Your approval is optional. If the two readings differ in a way that needs your judgment, the agent shows them side by side and asks a specific question, such as “Does the identity include the endpoint?”
 
-Choose “Work through this now” to settle the interpretation together, or “Save the question and continue with independent claims” to return to it later. When you are away, the agent will use the second option. The question will stay in the review queue, the affected claim and any claims that depend on the answer will wait, and the agent will revisit outstanding questions before its final summary.
+Choose “Work through this now” to settle the interpretation together, or “Save the question and continue with independent claims” to return to it later. When you are away, the agent uses the second option. The question stays in the review queue. The affected claim and any claims that depend on the answer wait. The agent revisits outstanding questions before its final summary.
+
+During proof work, the queue can show “Statement drafted (proof in progress)” or “Statement approved (proof in progress).” If you approve the statement at this stage, that approval carries over when the proof closes against the same statement and comparison. A change to the formal statement calls for a fresh comparison.
 
 ## What am I being asked to decide?
 

@@ -394,8 +394,19 @@ def audit(args):
     contract = (root/args.contract).resolve(strict=True)
     if not contract.is_relative_to(root) or contract.suffix != ".lean":
         raise ValueError("Keep the independent contract in the Lean package")
+    statement_only = bool(getattr(args, "statement_only", False))
+    declaration = getattr(args, "declaration", None)
     witness = getattr(args, "witness", None)
-    for name in (args.declaration, args.expected, *args.target, *([witness] if witness else [])):
+    targets = list(getattr(args, "target", None) or [])
+    statements = list(getattr(args, "statements", None) or [])
+    if statement_only:
+        if declaration:
+            raise ValueError("--statement-only does not accept a proof declaration")
+        if not statements:
+            raise ValueError("--statement-only requires --statements")
+    elif not declaration:
+        raise ValueError("Supply a proof declaration, or pass --statement-only")
+    for name in (*([declaration] if declaration else []), args.expected, *targets, *([witness] if witness else [])):
         if not re.fullmatch(r"[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*", name):
             raise ValueError("Expected a fully qualified Lean identifier")
     pin = (root/"lean-toolchain").read_text(encoding="utf-8-sig").strip()
@@ -406,11 +417,10 @@ def audit(args):
     lake = select_lake(root, pin, env, sys.stderr, offline=True)
     contract_path = contract.relative_to(root).as_posix()
     scoped = None
-    build_targets = list(args.target)
-    statements = list(getattr(args, "statements", None) or [])
+    build_targets = list(targets)
     if build_targets or statements:
         try:
-            closure, contract_targets = module_inputs(lake, root, env, args.target, contract_path)
+            closure, contract_targets = module_inputs(lake, root, env, targets, contract_path)
         except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
             if statements:
                 raise ValueError(f"Cannot verify statement independence: {exc}") from exc
@@ -418,23 +428,32 @@ def audit(args):
         else:
             # A default build still hashes the whole package. Statement checks
             # need a verified module layout regardless of the build target.
-            if build_targets:
+            if build_targets or statement_only:
                 scoped = closure
-                build_targets += [t for t in contract_targets if t[1:] not in args.target]
+                build_targets += [t for t in contract_targets if t[1:] not in targets]
     initial = inputs(root) if scoped is None else hash_paths(root, scoped)
     if contract_path not in initial or pin != (root/"lean-toolchain").read_text(encoding="utf-8-sig").strip():
         raise ValueError("Missing contract or toolchain pin changed during audit setup")
     # The Lake build runner sends output to an actual file descriptor.
     run([*lake, "--no-cache", "build", *build_targets], root, env, sys.stderr)
-    declaration = args.declaration
-    program = (contract.read_text(encoding="utf-8-sig") + "\n" +
-               f"example : {args.expected} := {declaration}\n#print axioms {declaration}\n")
-    result = subprocess.run([*lake, "env", "lean", "--stdin"], input=program.encode(),
-                            cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    output = result.stdout.decode("utf-8-sig", errors="replace")
-    if result.returncode or re.search(r"\bwarning:", output, re.I):
-        raise ValueError("Lean contract check did not pass cleanly:\n"+output)
-    axioms = axiom_report(output, declaration)
+    if statement_only:
+        program = (contract.read_text(encoding="utf-8-sig") + "\n" +
+                   f"example : Prop := {args.expected}\n#print axioms {args.expected}\n")
+        result = subprocess.run([*lake, "env", "lean", "--stdin"], input=program.encode(),
+                                cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        output = result.stdout.decode("utf-8-sig", errors="replace")
+        if result.returncode or re.search(r"\bwarning:", output, re.I):
+            raise ValueError("Lean statement check did not pass cleanly:\n"+output)
+        axioms = axiom_report(output, args.expected)
+    else:
+        program = (contract.read_text(encoding="utf-8-sig") + "\n" +
+                   f"example : {args.expected} := {declaration}\n#print axioms {declaration}\n")
+        result = subprocess.run([*lake, "env", "lean", "--stdin"], input=program.encode(),
+                                cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        output = result.stdout.decode("utf-8-sig", errors="replace")
+        if result.returncode or re.search(r"\bwarning:", output, re.I):
+            raise ValueError("Lean contract check did not pass cleanly:\n"+output)
+        axioms = axiom_report(output, declaration)
     if witness:
         hypotheses = hypotheses_record(lake, root, env, contract_path, args.expected, witness)
     else:
@@ -454,15 +473,21 @@ def audit(args):
         final = inputs(root)
     else:
         try:
-            final_scope, _ = module_inputs(lake, root, env, args.target, contract_path)
+            final_scope, _ = module_inputs(lake, root, env, targets, contract_path)
         except (KeyError, OSError, TypeError, ValueError) as exc:
             raise ValueError(f"Could not confirm the dependency closure after the audit: {exc}") from exc
         final = hash_paths(root, final_scope)
     if initial != final:
         raise ValueError("Package inputs changed during the audit; rerun on stable sources")
-    return dict(declaration=declaration, contract=contract.relative_to(root).as_posix(),
+    if statement_only:
+        return dict(statement_only=True, contract=contract_path, expected=args.expected,
+                    toolchain=pin, axioms=axioms, targets=targets, input_scope="module-closure",
+                    checked_inputs=initial, statements=statements, lean_output=output.strip(),
+                    statement=statement, defaults=defaults,
+                    **({"hypotheses": hypotheses} if hypotheses else {}))
+    return dict(declaration=declaration, contract=contract_path,
                 expected=args.expected, toolchain=pin, axioms=axioms,
-                targets=args.target, input_scope="module-closure" if scoped is not None else "full-package",
+                targets=targets, input_scope="module-closure" if scoped is not None else "full-package",
                 checked_inputs=initial, statements=statements, lean_output=output.strip(),
                 **({"statement": statement, "defaults": defaults} if statement else {}),
                 **({"hypotheses": hypotheses} if hypotheses else {}))
@@ -473,7 +498,9 @@ if __name__ == "__main__":
     parser.add_argument("package", type=Path)
     parser.add_argument("contract", help="File importing the target and defining the expected proposition")
     parser.add_argument("expected", help="Name of the independent proposition")
-    parser.add_argument("declaration", help="Name of the proof to check")
+    parser.add_argument("declaration", nargs="?", help="Name of the proof to check (omit with --statement-only)")
+    parser.add_argument("--statement-only", action="store_true",
+                        help="Audit only the expected proposition, definitions, defaults and optional --witness without checking a proof")
     parser.add_argument("--target", action="append", default=[], help="Build this proof module before checking its independent contract")
     parser.add_argument("--statements", action="append", default=[],
                         help="Directory or file holding the paper's statements and definitions; they may not import proof modules")

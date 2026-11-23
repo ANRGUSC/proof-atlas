@@ -55,7 +55,7 @@ class StatementApproval(unittest.TestCase):
     def packet(self):
         return review.get_packet(self.root,"t")
 
-    def compare(self, result="match", **updates):
+    def compare(self, result="match", default_assessments=None, **updates):
         record = dict(bindings=self.packet()["view"]["bindings"], result=result, paper_reading="For n=0 the rate is positive.",
                       lean_reading="The rate at zero exceeds zero.", paper_refs="paper.tex, theorem t", lean_refs="Statement and rate")
         record["analysis"] = dict(summary="Compare the rate at zero.", scope="Only n=0 is asserted.",
@@ -63,6 +63,8 @@ class StatementApproval(unittest.TestCase):
                                   advice="Check the value at zero.")
         if result != "match":
             record["analysis"]["suggested_feedback"] = "Please clarify the domain at zero."
+        if default_assessments is not None:
+            record["analysis"]["default_assessments"] = default_assessments
         record.update(updates)
         review.save_comparison(self.root,"t",record)
 
@@ -353,3 +355,93 @@ class StatementApproval(unittest.TestCase):
         html_page = render(self.packet()).decode("utf-8")
         self.assertIn("Inspect the checked hypotheses example · nonempty_case · Examples.lean L2", html_page)
         self.assertIn("theorem nonempty_case : True := trivial", html_page)
+
+    def test_gate1_statement_review_and_carryover(self):
+        from review_web import queue, render
+        stmt_text = b"def rate (n : Nat) := n + 1\ndef Statement : Prop := rate 0 > 0\n"
+        (self.root / "lean/Statements.lean").write_bytes(stmt_text)
+        (self.root / "lean/Examples.lean").write_text("import Statements\ntheorem ex : True := trivial\n", encoding="utf-8")
+        stmt_sha = hashlib.sha256(stmt_text).hexdigest()
+        ex_sha = hashlib.sha256((self.root / "lean/Examples.lean").read_bytes()).hexdigest()
+        constants = [
+            {"name": "Statement", "file": "Statements.lean", "lines": [2, 2], "sha256": "b" * 64},
+            {"name": "rate", "file": "Statements.lean", "lines": [1, 1], "sha256": "a" * 64},
+        ]
+        stmt_digest = hashlib.sha256("".join(f'{c["name"]} {c["sha256"]}\n' for c in constants).encode()).hexdigest()
+        stmt_audit = {
+            "statement_only": True, "expected": "Statement", "axioms": [], "toolchain": "test-pin",
+            "statements": ["Statements"],
+            "checked_inputs": {"Statements.lean": stmt_sha, "Examples.lean": ex_sha},
+            "statement": {"expected": "Statement", "constants": constants, "sha256": stmt_digest},
+            "defaults": [{"constant": "rate", "file": "Statements.lean", "lines": [1, 1], "construct": "HSub.hSub", "type": "Nat"}],
+            "hypotheses": {"declaration": "ex", "proposition": "True", "axioms": [], "file": "Examples.lean", "lines": [2, 2]},
+        }
+        (self.root / "stmt-audit.json").write_text(json.dumps(stmt_audit), encoding="utf-8")
+        self.project["work"]["t"] = {
+            "status": "drafted", "summary": "Drafted statement.", "step": "Gate 1 statement check.",
+            "next": "Prove t.", "updated": "2026-11-23T00:00:00Z",
+            "statement_check": {"audit": "stmt-audit.json", "package": "lean", "expected": "Statement"},
+        }
+        (self.root / "project.json").write_text(json.dumps(self.project), encoding="utf-8")
+
+        # Before comparison, review-work flags Gate 1 comparison as an agent task.
+        self.assertEqual(atlas.review_work(self.root)["agent_tasks"][0]["claim"], "t")
+
+        # review-inputs --side lean surfaces statement sources, defaults, and witness pre-closure.
+        script = Path(__file__).resolve().parents[1] / "scripts/atlas.py"
+        lean_side = json.loads(subprocess.check_output(
+            [sys.executable, str(script), "review-inputs", str(self.root), "t", "--side", "lean"], text=True))
+        self.assertEqual([s["name"] for s in lean_side["lean"]], ["Statement", "rate"])
+        self.assertEqual(lean_side["defaults"][0]["construct"], "HSub.hSub")
+        self.assertEqual(lean_side["witness"]["declaration"], "ex")
+
+        # The question is saved for immediate discussion or later review.
+        flag = lean_side["defaults"][0]["id"]
+        assessments = {flag: {"status": "justified", "explanation": "The definition uses truncated natural subtraction."}}
+        with self.assertRaisesRegex(ValueError, "one assessment"):
+            self.compare("unsure", issue="Endpoint ambiguous", actor="Author", next="Confirm whether n=0 is included.")
+        self.compare("unsure", default_assessments=assessments, issue="Endpoint ambiguous",
+                     actor="Author", next="Confirm whether n=0 is included.")
+        work_report = atlas.review_work(self.root)
+        self.assertFalse(work_report["agent_tasks"])
+        self.assertEqual(work_report["author_questions"][0]["issue"], "Endpoint ambiguous")
+
+        # Once Gate 1 matches, the review page labels it "Statement drafted (proof in progress)" and supports pre-approval.
+        self.compare("match", default_assessments=assessments, resolution="Author confirmed n=0 is included.")
+        pkt = self.packet()
+        self.assertTrue(pkt["statement_checked"])
+        self.assertFalse(pkt["checked"])
+        self.assertTrue(pkt["ready"])
+        self.assertFalse(atlas.review_work(self.root)["agent_tasks"])
+        with redirect_stdout(io.StringIO()):
+            atlas.build(self.root)
+        self.assertIn("Statement drafted (proof in progress)", (self.root / "dist/progress.html").read_text(encoding="utf-8"))
+        self.assertIn(b"Statement drafted (proof in progress)", render(pkt))
+        self.assertIn(b"Statement drafted (proof in progress)", queue([pkt]))
+
+        review.decide(self.root, "t", pkt["token"], "approve", "Author", scope_note="Matches paper.")
+        pkt = self.packet()
+        self.assertTrue(pkt["preapproved"])
+        self.assertFalse(pkt["approved"])
+        self.assertIn(b"Statement approved (proof in progress)", render(pkt))
+
+        # Closing the claim with the SAME statement.sha256 carries both comparison and approval over automatically!
+        self.receipt({"rate": "a" * 64, "Statement": "b" * 64})
+        self.project["work"]["t"] = {
+            "status": "closed", "scope": "Result.", "run_log": "run.log",
+            "checked_inputs": {self.lean["path"]: self.lean["sha256"]},
+            "closure": {"expected": "Statement", "declaration": "result", "package": "lean",
+                        "audit": "audit.json", "correspondence": "Result."},
+        }
+        (self.root / "project.json").write_text(json.dumps(self.project), encoding="utf-8")
+        closed_pkt = self.packet()
+        self.assertTrue(closed_pkt["checked"])
+        self.assertTrue(closed_pkt["approved"])
+        self.assertFalse(closed_pkt["preapproved"])
+        self.assertEqual(closed_pkt["author_scope"], "Matches paper.")
+
+        # If Statements/ changed during proof search (different statement.sha256), approval & comparison invalidate.
+        self.receipt({"rate": "c" * 64, "Statement": "b" * 64})
+        drifted = self.packet()
+        self.assertFalse(drifted["approved"])
+        self.assertEqual(drifted["assessment"], "Comparison pending")

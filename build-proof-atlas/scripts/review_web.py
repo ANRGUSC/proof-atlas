@@ -85,6 +85,8 @@ def render(data,secret=None,notice=""):
                 '<section><h2>What Lean proved</h2><small>Mathematical reading of the audited Lean statement</small>'+para(view["lean_reading"] or "The agent has not supplied a current independent reading.")+
                 para(view["lean_refs"])+'</section></div>')
     body=f'<p>{esc(v["edition"])} · {cid}</p><h1>{esc(data["title"])}</h1>'
+    if data.get("statement_checked") and not data["checked"]:
+        body+='<p><strong>Statement drafted (proof in progress)</strong> · Lean checked the statement definitions; the proof is not closed yet.</p>'
     body+=para(notice)+para(data["assessment"])
     body+=default_panel(data.get("defaults", []), v)
     if data["stronger_result"]:
@@ -96,6 +98,8 @@ def render(data,secret=None,notice=""):
         body+=para(BADGE+" · "+data["events"][-1]["by"])
         if data["approved_before_analysis"]:
             body+=para("The author approved these same two readings before the case-by-case analysis was added.")
+    elif data.get("preapproved"):
+        body+=para("Statement approved (proof in progress) · "+data["events"][-1]["by"]+" · Carries over automatically at closure if Statements/ is unchanged.")
     elif any(e["decision"]=="approve" for e in data["events"]):
         body+=para("The earlier approval is historical. A fresh review is available after the current comparison is ready.")
     page = data.get("page")
@@ -141,8 +145,16 @@ def render(data,secret=None,notice=""):
 
 def queue(entries):
     from atlas import esc
+    def status_label(d):
+        if d["approved"]:
+            return BADGE
+        if d.get("preapproved"):
+            return "Statement approved (proof in progress)"
+        if d.get("statement_checked") and not d["checked"]:
+            return "Statement drafted (proof in progress) · " + d["assessment"]
+        return d["assessment"]
     rows="".join(f'<li><a href="{review_url(d["id"])}">{esc(d["title"])}</a><br>'
-                 f'{esc(BADGE if d["approved"] else d["assessment"])} · {esc(d["actor"])}: {esc(d["next"])}</li>' for d in entries)
+                 f'{esc(status_label(d))} · {esc(d["actor"])}: {esc(d["next"])}</li>' for d in entries)
     return document("Author review",'<h1>Author review</h1><p>Compare the paper and the formal statement. Human review is optional.</p>'
                     '<p>Each next action names its owner. An active coding agent handles proof repairs during authorized work. '
                     'Submitting feedback saves it for that session or the next one. See the <a href="progress.html">dashboard</a> for reported activity.</p><ol>'+rows+'</ol>',"./")
