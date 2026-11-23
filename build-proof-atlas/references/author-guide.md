@@ -16,6 +16,10 @@ Lean checked means Lean accepted the recorded formal declaration against its exp
 
 Say “Open the local review dashboard for this paper.” You can ask during proof generation or after returning to the project later. The agent starts or reopens the local browser server. Open any claim from the queue. For a direct launch, run `python <skill>/scripts/atlas.py review <project-folder>`. To share a terminal session without opening a browser automatically, add `--no-open`. The terminal alternative is `python <skill>/scripts/atlas.py approve <project-folder> --by "Your name"`. Add a claim label before --by to select just that theorem.
 
+## How much work goes into finding examples?
+
+By default the agent tries a concrete example or an existing lemma to show that a theorem's hypotheses can hold together. If a new result is needed, the agent records what is missing and continues with independent claims. You can say “Skip witness searches for this paper” or “Pursue witnesses even when they need new lemmas.” A request such as “Do the extra work for Theorem 8” applies just to that theorem. The atlas remembers your choice across sessions and keeps previously checked examples.
+
 ## What am I being asked to decide?
 
 Each checked comparison opens with **How the statements compare**. Its rows explain why the paper and the formal theorem agree or differ on each important case. Read **Scope of the conclusion** and **Agent recommendation** for the decision the evidence supports. When an assumption or endpoint is in doubt, the agent supplies wording you can use or edit when reporting the difference. You can disagree with the recommendation. Only your explicit decision records an author review.

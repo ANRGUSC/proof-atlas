@@ -140,6 +140,20 @@ def exact_sources(root, work, audit):
     return result
 
 
+def witness_source(root, work, audit):
+    from atlas import local
+    hyp = (audit or {}).get("hypotheses")
+    if not hyp:
+        return None
+    item = dict(declaration=hyp["declaration"], proposition=hyp["proposition"])
+    file, lines = hyp.get("file"), hyp.get("lines")
+    if file and lines:
+        package = work["closure"]["package"]
+        source = local(root, package + "/" + file).read_text(encoding="utf-8-sig").splitlines()
+        item.update(file=file, lines=lines, text="\n".join(source[lines[0]-1:lines[1]]))
+    return item
+
+
 def get_packet(root, cid):
     from atlas import current_audit, manuscript_claims, read_source, local
     project = read(root/"project.json", {})
@@ -161,6 +175,7 @@ def get_packet(root, cid):
     reader = read(local(root,project["reader"]), {}) if project.get("reader") else {}
     data["page"] = work.get("page") or reader.get("claims",{}).get(cid,{}).get("page")
     data["sources"] = exact_sources(root,work,audit)
+    data["witness"] = witness_source(root,work,audit)
     return data
 
 

@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
+NO_EXAMPLE = "No checked example shows the hypotheses can hold"
+
 
 def esc(value):
     return html.escape(str(value), quote=True)
@@ -222,6 +224,25 @@ def build_local(root):
     return build(root, **options)
 
 
+def witness_plan(project, work, witness):
+    mode = work.get("witness_search", project.get("witness_search", "available"))
+    if mode not in ("available", "skip", "pursue"):
+        raise ValueError("witness_search must be available, skip, or pursue")
+    missing = work.get("witness_missing_result")
+    if witness:
+        action = "reuse checked witness"
+    elif mode == "skip":
+        action = "skip search"
+    elif missing:
+        action = "pursue missing result" if mode == "pursue" else "defer missing result"
+    else:
+        action = "try a concrete example or existing lemma"
+    plan = {"mode": mode, "action": action}
+    if missing and not witness:
+        plan["missing_result"] = missing
+    return plan
+
+
 def review_work(root, labels=(), *, require_ci=False, ci_receipt=None):
     """List actionable review findings. Optional approvals are never obligations."""
     import subprocess
@@ -231,7 +252,7 @@ def review_work(root, labels=(), *, require_ci=False, ci_receipt=None):
         raise ValueError("Unknown review-work claim")
     selected = list(dict.fromkeys(labels or claims))
     report = {"scope": project.get("proof_work"), "agent_tasks": [], "author_questions": [],
-              "uncommitted_delivery_files": [], "ci_pending": []}
+              "uncommitted_delivery_files": [], "ci_pending": [], "witness_search": {}}
     ci = None
     if require_ci:
         if project.get("hosting", {}).get("lean_ci") != "enabled":
@@ -252,6 +273,8 @@ def review_work(root, labels=(), *, require_ci=False, ci_receipt=None):
     for cid in selected:
         work = project.get("work", {}).get(cid, {})
         packet = reviews.get_packet(root,cid)
+        if claims[cid]["kind"] != "conjecture":
+            report["witness_search"][cid] = witness_plan(project, work, packet["witness"])
         if packet["disputed"] or work.get("status")=="closed" and packet["actor"]=="Proof agent":
             key = "author_questions" if packet["actor"]=="Author" else "agent_tasks"
             report[key].append(dict(claim=cid, issue=packet["issue"], next=packet["next"]))
@@ -303,6 +326,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     rows, entries, log_links = [], [], {}
     stale = {}
     unchecked = []
+    no_example = []
     subproof_lists = {}
     closed_results = 0
     for c in claims:
@@ -328,6 +352,9 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
                 raise ValueError(f"{cid}: closure requires matching audit evidence, correspondence and resolved obligations")
             if not audit.get("statements"):
                 unchecked.append(cid)
+            entry["hypotheses"] = audit.get("hypotheses")
+            if not audit.get("hypotheses"):
+                no_example.append(cid)
             (output / "logs").mkdir(exist_ok=True)
             name = hashlib.sha256(receipt).hexdigest() + ".json"
             atomic(output / "logs" / name, receipt)
@@ -343,6 +370,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         rd = reviews.packet(root,p,c,w,audit if checked else None,comparisons.get(cid),reviews.history(root,cid),checked)
         rd["page"] = entry.get("page")
         rd["sources"] = reviews.exact_sources(root,w,audit) if checked else []
+        rd["witness"] = reviews.witness_source(root,w,audit) if checked else None
         review_entries.append(rd)
         atomic(output/reviews.review_url(cid),review_web.render(rd))
         entry["status"] = "correspondence under review" if rd["disputed"] else status
@@ -382,6 +410,7 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
             if (record and record.get("audit_sha256") == hashlib.sha256(receipt).hexdigest()
                     and all(record.get(k) == audit[k] for k in ("expected", "declaration", "toolchain"))
                     and (not audit.get("statement") or record.get("statement_sha256") == audit["statement"]["sha256"])
+                    and (not audit.get("hypotheses") or record.get("hypotheses") == audit["hypotheses"]["proposition"])
                     and set(record["axioms"]) == set(audit["axioms"])):
                 verification.update(remote="Machine verified on GitHub",
                                     url=f'{p["hosting"]["repository"]}/actions/runs/{ci["run_id"]}/attempts/{ci["attempt"]}',
@@ -409,6 +438,8 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
         url = "proofs/index.html#/claim/" + quote(cid, safe="")
         target = ' <strong class="proof-target">Current proof target</strong>' if cid == p.get("focus") else ''
         badge = f' · <a href="{url}?view=lean">{esc(label)}</a>'
+        if checked and not entry.get("hypotheses"):
+            badge += f' · {NO_EXAMPLE}'
         badge += f' · <a href="{reviews.review_url(cid)}">Review this claim</a>'
         if rd["disputed"]:
             badge += f' · {esc(rd["issue"])} · {esc(rd["actor"])}: {esc(rd["next"])}'
@@ -513,6 +544,9 @@ def build(root, *, ci_receipt=None, commit=None, artifact_id=None):
     if unchecked:
         print("Warning: these closures were audited without --statements, so their statements may depend on "
               f"proof modules: {', '.join(unchecked)}. See 'Separate statements from proofs' in SKILL.md.")
+    if no_example:
+        print(f"Warning: {NO_EXAMPLE.lower()} for these closures: {', '.join(no_example)}. "
+              "See 'Show the hypotheses can hold' in SKILL.md.")
     hosting = p.get("hosting") or {}
     if not hosting.get("repository") and hosting.get("decision") != "local":
         print("Hosting decision pending. Ask where the author wants this paper's explorer and dashboard hosted.")
@@ -554,6 +588,8 @@ if __name__ == "__main__":
                 packet["paper"] = data["view"]["excerpt"]
             if args.side != "paper":
                 packet["lean"] = data["sources"]
+                if data.get("witness"):
+                    packet["witness"] = data["witness"]
             if not args.side:
                 packet["reported_differences"] = [e["id"] for e in data["events"] if e["decision"]=="difference"]
             print(json.dumps(packet,ensure_ascii=False,indent=2))

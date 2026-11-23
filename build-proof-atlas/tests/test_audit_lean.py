@@ -193,6 +193,64 @@ class AuditClosure(unittest.TestCase):
             before = {c["name"]: c["sha256"] for c in first["constants"]}
             self.assertEqual([c["name"] for c in changed["constants"] if c["sha256"] != before[c["name"]]], ["rate"])
 
+    def test_example_shows_hypotheses_can_hold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pin = os.environ["ELAN_TOOLCHAIN"]
+            (root/"lean-toolchain").write_text(pin)
+            (root/"lakefile.toml").write_text('name = "Example"\n[[lean_lib]]\nname = "Statements"\n'
+                                              '[[lean_lib]]\nname = "Proofs"\n[[lean_lib]]\nname = "Examples"\n')
+            for folder in ("Statements", "Proofs", "Examples"):
+                (root/folder).mkdir()
+            ex = "∃ n : Nat, 0 < n ∧ n < 10"
+            sources = {
+                "Statements/Main.lean": "def Statement : Prop := ∀ n : Nat, 0 < n → n < 10 → n ≠ 0\n"
+                                        "def Guarded : Prop := ∀ n : Nat, 0 < n → let k := n; ∃ j, j = k ∧ ∀ m, k < m → m < 3 → 0 < m\n",
+                "Proofs/Main.lean": "import Statements.Main\ntheorem main : Statement := fun n h _ => by omega\n"
+                                    "theorem guarded : Guarded := fun n h => ⟨n, rfl, fun m _ _ => by omega⟩\n",
+                # Examples import only statements: they show the hypotheses hold without any proof.
+                "Examples/Main.lean": "import Statements.Main\n"
+                                      f"theorem good : {ex} := ⟨1, by decide, by decide⟩\n"
+                                      "theorem weaker : ∃ n : Nat, 0 < n := ⟨1, by decide⟩\n"
+                                      f"theorem unfinished : {ex} := sorry\n"
+                                      f"axiom extra : {ex}\ntheorem assumed : {ex} := extra\n"
+                                      "theorem guard_holds : ∃ n m : Nat, 0 < n ∧ n < m ∧ m < 3 := ⟨1, 2, by decide, by decide, by decide⟩\n",
+                "Contract.lean": "import Statements.Main\nimport Proofs.Main\nimport Examples.Main\n",
+            }
+            for name, body in sources.items():
+                (root/name).write_text(body, encoding="utf-8")
+            env = os.environ.copy()
+            lake = audit_lean.select_lake(root, pin, env, sys.stderr, offline=True)
+            subprocess.run([*lake, "update"], cwd=root, env=env, check=True)
+
+            def audit(witness, expected="Statement", declaration="main"):
+                return audit_lean.audit(SimpleNamespace(package=root, contract="Contract.lean", expected=expected,
+                                                        declaration=declaration, target=["Proofs.Main"],
+                                                        statements=["Statements"], witness=witness))
+
+            record = audit("good")["hypotheses"]
+            self.assertEqual((record["declaration"], record["proposition"]), ("good", "∃ n, 0 < n ∧ n < 10"))
+            self.assertEqual((record["file"], record["lines"]), ("Examples/Main.lean", [2, 2]))
+            self.assertLessEqual(set(record["axioms"]), {"propext", "Classical.choice", "Quot.sound"})
+            # The example must prove exactly the hypotheses, named in the error.
+            with self.assertRaisesRegex(ValueError, r"proves\n  ∃ n, 0 < n\nbut the hypotheses of Statement need\n  ∃ n, 0 < n ∧ n < 10"):
+                audit("weaker")
+            with self.assertRaisesRegex(ValueError, "unfinished uses additional axioms: sorryAx"):
+                audit("unfinished")
+            with self.assertRaisesRegex(ValueError, "assumed uses additional axioms: extra"):
+                audit("assumed")
+            # A guarded clause in the conclusion, here under let and ∃, adds its guard to the hypotheses.
+            # The theorem's own choice j appears in no guard, so it is not part of the example.
+            guarded = audit("guard_holds", expected="Guarded", declaration="guarded")["hypotheses"]
+            self.assertEqual(guarded["proposition"], "∃ n m, 0 < n ∧ n < m ∧ m < 3")
+            with self.assertRaisesRegex(ValueError, "hypotheses of Guarded need"):
+                audit("good", expected="Guarded", declaration="guarded")
+            # Without an example the audit passes as before and warns.
+            with tempfile.TemporaryFile("w+", encoding="utf-8") as err, patch.object(sys, "stderr", err):
+                self.assertNotIn("hypotheses", audit(None))
+                err.seek(0)
+                self.assertIn("no --witness was given", err.read())
+
 
 if __name__ == "__main__":
     unittest.main()

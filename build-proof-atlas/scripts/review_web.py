@@ -76,6 +76,12 @@ def render(data,secret=None,notice=""):
            '?view=lean">Lean source and verification evidence</a></p>')
     if data["sources"]:
         body+='<details><summary>Inspect the exact Lean statement and definitions</summary>'+sources(data["sources"])+'</details>'
+    if data.get("witness"):
+        w = data["witness"]
+        loc = f' · {esc(w["file"])} L{w["lines"][0]}' if w.get("file") and w.get("lines") else ""
+        snippet = f'<pre>{esc(w["text"])}</pre>' if w.get("text") else ""
+        body+=(f'<details><summary>Inspect the checked hypotheses example · {esc(w["declaration"])}{loc}</summary>'
+               f'<p>Proves: <code>{esc(w["proposition"])}</code></p>{snippet}</details>')
     body+=para(data["issue"])+para(data["resolution"])
     body+='<p><strong>Next action · '+esc(data["actor"])+'</strong><br>'+esc(data["next"])+'</p>'
     if secret:
